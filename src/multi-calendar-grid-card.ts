@@ -308,7 +308,7 @@ export class MultiCalendarGridCard extends LitElement {
     this._stopTimers();
   }
 
-  protected firstUpdated(_changed: PropertyValues) {
+  protected firstUpdated(): void {
     this._scrollEl = (this.shadowRoot || this.renderRoot).querySelector<HTMLElement>(".scroll") || undefined;
     this._restoreScroll();
   }
@@ -505,8 +505,8 @@ export class MultiCalendarGridCard extends LitElement {
       const dFmt = new Intl.DateTimeFormat(locale, { weekday: "short", day: "2-digit", month: "short" });
       const same = s.toDateString() === e.toDateString();
       // e for all-day is exclusive in raw; we display inclusive end day
-      const eInc = new Date(e.getFullYear(), e.getMonth(), e.getDate()); // midnight
-      eInc.setMilliseconds(-1); // previous day end
+      const eInc = new Date(e.getFullYear(), e.getMonth(), e.getDate());
+      eInc.setMilliseconds(-1);
       return same ? `${dFmt.format(s)}` : `${dFmt.format(s)} → ${dFmt.format(new Date(eInc))}`;
     }
     const hourCycle: any = hassLocale?.time_format === "12" ? "h12" : "h23";
