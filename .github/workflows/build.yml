@@ -1,14 +1,14 @@
 name: build
 
 on:
-  workflow_dispatch:       # allows manual "Run workflow"
+  workflow_dispatch:       # enable manual runs
   push:
     branches: [ main ]     # run on commits to main
     tags: [ "v*" ]         # run on tags like v0.6.0
   pull_request:
 
 permissions:
-  contents: write          # needed for release job
+  contents: write          # needed for creating releases
 
 jobs:
   build:
@@ -21,9 +21,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      # 🔧 If package-lock.json exists, use npm ci; otherwise use npm install
+      # Works whether or not a lockfile exists
       - name: Install deps
         run: |
           if [ -f package-lock.json ]; then
