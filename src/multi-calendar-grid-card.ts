@@ -1,11 +1,14 @@
 /**
- * Multi-Calendar Grid Card — Lit + TypeScript (no decorators) v0.6.1-nd
- * - Avoids TS decorator typing issues in CI by using Lit's static properties map
- * - Feature parity with v0.6 step: 7-day grid, legend filters, week nav, now-line,
- *   all-day pills + timed blocks, preferred start scroll, remember offset, footer version.
+ * Multi-Calendar Grid Card — Lit + TypeScript (no decorators)
+ * Version is injected at build time via __VERSION__ (see CI workflow).
  */
 
 import { LitElement, html, css, nothing, PropertyValues } from "lit";
+
+// The workflow injects a string into __VERSION__ at build time.
+// In dev/PRs (no injection), we fall back to "dev".
+declare const __VERSION__: string | undefined;
+const VERSION = (typeof __VERSION__ !== "undefined" && __VERSION__) ? __VERSION__ : "dev";
 
 // ---------- Types ----------
 export interface McgEntityConfig { entity: string; name?: string; color?: string; }
@@ -42,7 +45,6 @@ export interface HomeAssistantLike {
   locale?: { language?: string; time_format?: "12" | "24" };
 }
 
-const VERSION = "0.6.1-nd";
 const TAG = "multi-calendar-grid-card";
 const STORAGE_PREFIX = TAG;
 
@@ -76,11 +78,8 @@ const softBg = (hex?: string, a = 0.55) => { const { r, g, b } = hexToRgb(hex); 
 export class MultiCalendarGridCard extends LitElement {
   static version = VERSION;
 
-  // Lit (no decorators): declare reactive/aux properties here
   static properties = {
-    // HA provides this property; we don't reflect it to attribute
     hass: { attribute: false },
-    // internal reactive state
     _config: { attribute: false, state: true },
     _weekOffset: { state: true },
     _error: { state: true },
@@ -88,22 +87,18 @@ export class MultiCalendarGridCard extends LitElement {
     _days: { state: true },
   };
 
-  // Public HA handle
   public hass!: HomeAssistantLike;
 
-  // Internal state (initialized later)
   private _config!: McgConfig;
   private _weekOffset = 0;
   private _error: string | null = null;
   private _weekStart!: Date;
   private _days: DayBucket[] = [];
 
-  // timers, filters
   private _tick?: number; private _refresh?: number;
   private _active: Record<string, boolean> = {};
   private _scrollEl?: HTMLElement;
 
-  // ---- Config element (placeholder) ----
   static getConfigElement() {
     const div = document.createElement("div");
     div.innerHTML = `<div style="padding:8px">Use YAML to configure this card. Lit editor coming soon. (v${VERSION})</div>`;
@@ -136,7 +131,6 @@ export class MultiCalendarGridCard extends LitElement {
 
   getCardSize() { const vh = Number(this._config?.height_vh || 80); const approx = Math.max(300, vh * 7); return Math.ceil(approx / 50); }
 
-  // ---- Lifecycle ----
   connectedCallback(): void { super.connectedCallback(); this._startTimers(); }
   disconnectedCallback(): void { super.disconnectedCallback(); this._stopTimers(); }
 
@@ -153,7 +147,6 @@ export class MultiCalendarGridCard extends LitElement {
     }
   }
 
-  // ---- Data ----
   private async _fetchEvents() {
     if (!this.hass) return;
     this._error = null;
@@ -197,7 +190,6 @@ export class MultiCalendarGridCard extends LitElement {
         }
       }
 
-      // lane layout
       timed.sort((a, b) => a.top - b.top || b.height - a.height);
       const lanes: number[] = [];
       for (const ev of timed) {
@@ -228,7 +220,6 @@ export class MultiCalendarGridCard extends LitElement {
     };
   }
 
-  // ---- Timers ----
   private _startTimers() {
     this._stopTimers();
     this._tick = window.setInterval(() => (this as any).requestUpdate(), 60 * 1000);
@@ -241,7 +232,6 @@ export class MultiCalendarGridCard extends LitElement {
     this._tick = undefined; this._refresh = undefined;
   }
 
-  // ---- UI helpers ----
   private _recomputeWeekBounds() {
     const base = weekStartOf(new Date(), this._config?.first_day ?? 1);
     const s = new Date(base); s.setDate(s.getDate() + this._weekOffset * 7);
@@ -299,7 +289,6 @@ export class MultiCalendarGridCard extends LitElement {
                 : `${dFmt.format(s)} ${tFmt.format(s)} → ${dFmt.format(e)} ${tFmt.format(e)}`;
   }
 
-  // ---- Styles ----
   static styles = css`
     :host{display:block}
     ha-card{border-radius:16px; overflow:hidden}
@@ -331,7 +320,6 @@ export class MultiCalendarGridCard extends LitElement {
     .footer{font-size:10px; color:var(--secondary-text-color); text-align:right; margin:4px 12px 10px}
   `;
 
-  // ---- Render ----
   render() {
     const ws = this._weekStart;
     const we = addMin(new Date(ws), 7 * 24 * 60 - 1);
@@ -450,7 +438,7 @@ export class MultiCalendarGridCard extends LitElement {
   }
 }
 
-// Register element (no @customElement)
+// Register element
 if (!customElements.get(TAG)) customElements.define(TAG, MultiCalendarGridCard);
 
 // Register in card picker
