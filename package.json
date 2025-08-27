@@ -2,7 +2,6 @@
   "name": "multi-calendar-grid-card",
   "private": true,
   "type": "module",
-  "version": "0.6.0",
   "scripts": {
     "build": "esbuild ./src/multi-calendar-grid-card.ts --bundle --minify --sourcemap --outfile=./dist/multi-calendar-grid-card.js",
     "check": "tsc --noEmit"
