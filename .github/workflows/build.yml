@@ -1,56 +1,71 @@
 name: build
 
 on:
-  workflow_dispatch:       # enable manual runs
+  workflow_dispatch:
   push:
-    branches: [ main ]     # run on commits to main
-    tags: [ "v*" ]         # run on tags like v0.6.0
+    branches: [ main ]
+    tags: [ "v*" ]
   pull_request:
 
 permissions:
-  contents: write          # needed for creating releases
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      versioned_file: ${{ steps.meta.outputs.versioned_file }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      # Works whether or not a lockfile exists
-      - name: Install deps
+      - name: Install deps (lockfile required)
+        run: npm ci
+
+      - name: Determine version string
+        id: ver
+        shell: bash
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "ver=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           else
-            npm install --no-audit --no-fund
+            echo "ver=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           fi
 
       - name: Type-check
         run: npm run check
 
-      - name: Build
-        run: npm run build
+      - name: Build (inject version into bundle)
+        run: npm run build -- --define:__VERSION__=\"${{ steps.ver.outputs.ver }}\"
 
-      - name: Set VERSION from ref
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+      - name: Rename/copy outputs
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            OUT="multi-calendar-grid-card_lit_v${{ steps.ver.outputs.ver }}.js"
+          else
+            OUT="multi-calendar-grid-card_lit_${{ steps.ver.outputs.ver }}.js"
+          fi
+          cp dist/multi-calendar-grid-card.js "dist/${OUT}"
+          # Keep an unversioned copy for HACS / stable URL
+          cp dist/multi-calendar-grid-card.js "dist/multi-calendar-grid-card.js"
+          echo "versioned_file=${OUT}" >> $GITHUB_OUTPUT
 
-      - name: Rename built file (when tagging)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: mv dist/multi-calendar-grid-card.js "dist/multi-calendar-grid-card_lit_v${{ env.VERSION }}.js"
-
-
-
-      - name: Upload artifact
+      - name: Upload (versioned)
         uses: actions/upload-artifact@v4
         with:
-          name: multi-calendar-grid-card
+          name: ${{ steps.meta.outputs.versioned_file }}
+          path: dist/${{ steps.meta.outputs.versioned_file }}
+
+      - name: Upload (unversioned for HACS)
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-calendar-grid-card.js
           path: dist/multi-calendar-grid-card.js
 
   release:
@@ -60,9 +75,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: multi-calendar-grid-card
+          name: ${{ needs.build.outputs.versioned_file }}
           path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: multi-calendar-grid-card.js
+          path: dist
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/multi-calendar-grid-card.js
+          files: |
+            dist/${{ needs.build.outputs.versioned_file }}
+            dist/multi-calendar-grid-card.js
