@@ -13,8 +13,9 @@ Keep this file simple and human-edited. Use it to collect ideas, pick a small �
 ---
 
 ## Next (shortlist)
-- [ ] **MCG-001** — Hide weekends / work-week view (Priority: M)
-- [ ] **MCG-002** — Partial-day grid (slot_min_time → slot_max_time) (Priority: H)
+| ID       | Title                                 | Priority | Notes |
+|----------|----------------------------------------|----------|-------|
+| MCG-001  | GUI editor (ha-form)                   | M        | Basic fields first; advanced later |
 
 ## In progress
 - [ ] *(add items when you start coding them)*
@@ -22,10 +23,14 @@ Keep this file simple and human-edited. Use it to collect ideas, pick a small �
 ## Backlog
 | ID       | Title                                 | Priority | Notes |
 |----------|----------------------------------------|----------|-------|
-| MCG-003  | Event action handlers (tap/hold/double)| M        | Open URL, call service, more-info, etc. |
-| MCG-004  | i18n: German strings                   | L        | Auto default from HA locale |
-| MCG-005  | “Jump to now” button                   | L        | Scroll to current time in current week |
-| MCG-006  | GUI editor (ha-form)                   | M        | Basic fields first; advanced later |
+| MCG-002  | i18n: German strings                   | L        | Auto default from HA locale |
+|MCG-003|include daily weather|M|see details below|
+
+### MCG-003 — include daily weather
+- **Status:** Backlog
+- **Priority:** M
+- **Why:** (added value and compared to existing market solution like skylight an existing feature
+- **Proposal:** Display high and low temperature for the 7 day forecast based on the HA weather integration. implementation first with an existing global weather integration as PoC and in a later step have it an optional attribut for different users to select their best local integration
 
 ## Done
 - [x] **MCG-000** — Lit + TS migration + persistence + dialog — **v0.7.0**
