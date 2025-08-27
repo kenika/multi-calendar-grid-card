@@ -5,7 +5,7 @@ export default tseslint.config(
   // Ignore build outputs and deps
   { ignores: ["dist/**", "node_modules/**"] },
 
-  // TypeScript recommended rules (no project config needed)
+  // TypeScript recommended rules
   ...tseslint.configs.recommended,
 
   // Our tweaks
