@@ -1,7 +1,21 @@
 {
   "name": "multi-calendar-grid-card",
+  "version": "0.7.0",
+  "description": "Home Assistant Lovelace card: Multi-Calendar Grid Card (Lit + TypeScript)",
   "private": true,
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kenika/multi-calendar-grid-card.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kenika/multi-calendar-grid-card/issues"
+  },
+  "homepage": "https://github.com/kenika/multi-calendar-grid-card#readme",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "esbuild ./src/multi-calendar-grid-card.ts --bundle --minify --sourcemap --outfile=./dist/multi-calendar-grid-card.js",
     "check": "tsc --noEmit",
@@ -11,11 +25,12 @@
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.3.0",
     "@typescript-eslint/parser": "^8.3.0",
-    "esbuild": "^0.24.0",
-    "eslint": "^9.7.0",
+    "typescript-eslint": "^8.3.0",
+    "eslint": "^9.34.0",
     "eslint-config-prettier": "^9.1.0",
-    "lit": "^3.1.2",
     "prettier": "^3.3.3",
+    "esbuild": "^0.24.0",
+    "lit": "^3.1.2",
     "typescript": "^5.5.4"
   }
 }
