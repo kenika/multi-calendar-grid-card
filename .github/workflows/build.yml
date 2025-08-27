@@ -23,6 +23,7 @@ jobs:
           node-version: 20
           cache: npm
 
+      # Uses your committed package-lock.json for reproducible installs
       - name: Install deps (lockfile required)
         run: npm ci
 
@@ -42,6 +43,7 @@ jobs:
       - name: Build (inject version into bundle)
         run: npm run build -- --define:__VERSION__=\"${{ steps.ver.outputs.ver }}\"
 
+      # ✅ Create ONLY the versioned copy; keep the original unversioned file as-is
       - name: Rename/copy outputs
         id: meta
         shell: bash
@@ -51,9 +53,7 @@ jobs:
           else
             OUT="multi-calendar-grid-card_lit_${{ steps.ver.outputs.ver }}.js"
           fi
-          cp dist/multi-calendar-grid-card.js "dist/${OUT}"
-          # Keep an unversioned copy for HACS / stable URL
-          cp dist/multi-calendar-grid-card.js "dist/multi-calendar-grid-card.js"
+          cp -f dist/multi-calendar-grid-card.js "dist/${OUT}"
           echo "versioned_file=${OUT}" >> $GITHUB_OUTPUT
 
       - name: Upload (versioned)
