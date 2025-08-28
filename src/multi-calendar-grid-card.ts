@@ -1,622 +1,278 @@
-/**
- * Multi Calendar Grid Card (baseline with inline weather)
- * Version: 1.0.2-weather-inline
- *
- * Notes:
- * - No decorators used (avoids TS/ES decorator config issues in CI).
- * - Single hass accessor (no duplicates).
- * - Inline weather pill uses WS daily → hourly aggregate → attributes fallback.
+/* Multi-Calendar Grid Card
+ * v0.7.1 (today-start + DOM weather only)
+ * ---------------------------------------------------------------------
+ * - Week view now starts at *today* by default (configurable).
+ * - Removed any built-in header-weather rendering. Weather should be
+ *   injected by the DOM addon only to avoid duplicates.
+ * - Minor tidy-ups & footer version bump.
+ * ---------------------------------------------------------------------
  */
 
-import { LitElement, html, css, nothing } from "lit";
+import { css, html, LitElement, nothing, PropertyValues } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 
-/* ============================================================================
-   BEGIN: Inline Weather Helpers (self-contained)
-   ========================================================================== */
+/** Public card tag/type */
+export const CARD_TAG = "multi-calendar-grid-card";
+export const CARD_TYPE = CARD_TAG;
+export const CARD_VERSION = "0.7.1";
 
-type WcForecastItem = {
-  datetime?: string;            // ISO
-  date?: string;                // alt
-  time?: string;                // alt
-  dt?: string | number;         // alt
-  timestamp?: string | number;  // alt
-
-  condition?: string;
-  condition_description?: string;
-  state?: string;
-  symbol?: string;
-
-  temperature?: number;
-  temperature_high?: number;
-  temp?: number;
-  templow?: number;
-  temperature_low?: number;
-
-  precipitation_probability?: number;
-  precipitation_chance?: number;
-  precipitation?: number;       // amount (mm)
-  precipitation_unit?: string;
-
-  wind_speed?: number;
-  wind_speed_kmh?: number;
-  wind_speed_mps?: number;
+/** Defaults */
+const DEFAULTS = {
+  first_day: 1,                 // used when start_from_today === false
+  start_from_today: true,       // NEW: start 7-day view at today by default
+  slot_min_time: "07:00:00",
+  slot_max_time: "22:00:00",
+  slot_minutes: 30,
+  locale: "en",
+  show_now_indicator: true,
+  show_all_day: true,
+  height_vh: 80,
+  remember_offset: true,
+  storage_key: `${CARD_TYPE}.weekOffset`,
+  header_compact: false,
+  data_refresh_minutes: 5,
+  px_per_min: 1.6,
 };
 
-type WcDaily = {
-  key: string;          // YYYY-MM-DD
-  datetime: string;     // noon ISO for stable formatting
-  condition: string;
-  temperature: number | null;   // high
-  templow: number | null;       // low
-  precipitation_probability?: number | null;
-  precipitation?: number | null; // amount if available
-  wind_speed?: number | null;
+type EntityCfg = {
+  entity: string;
+  name?: string;
+  color?: string;
 };
 
-const WC_INLINE_VERSION = "inline-weather 0.4.0";
-
-const wc_num = (v: any): number | null => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-
-const wc_dayKey = (d: Date) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-
-const wc_icon = (condRaw: string | undefined) => {
-  const cond = (condRaw || "-").toLowerCase().replace(/\s+/g, "");
-  const map: Record<string, string> = {
-    "clear-night": "mdi:weather-night",
-    "cloudy": "mdi:weather-cloudy",
-    "fog": "mdi:weather-fog",
-    "hail": "mdi:weather-hail",
-    "lightning": "mdi:weather-lightning",
-    "lightning-rainy": "mdi:weather-lightning-rainy",
-    "partlycloudy": "mdi:weather-partly-cloudy",
-    "pouring": "mdi:weather-pouring",
-    "rainy": "mdi:weather-rainy",
-    "snowy": "mdi:weather-snowy",
-    "snowy-rainy": "mdi:weather-snowy-rainy",
-    "sunny": "mdi:weather-sunny",
-    "windy": "mdi:weather-windy",
-    "windy-variant": "mdi:weather-windy-variant",
-    "exceptional": "mdi:weather-alert",
-  };
-  const norm = cond
-    .replace("overcast", "cloudy")
-    .replace("partlysunny", "partlycloudy")
-    .replace("mostlycloudy", "partlycloudy")
-    .replace("drizzle", "rainy");
-  return map[norm] || map[cond] || "mdi:weather-cloudy";
-};
-
-const wc_mode = (arr: string[]) => {
-  if (!arr.length) return null;
-  const m = new Map<string, number>();
-  for (const v of arr) m.set(v, (m.get(v) || 0) + 1);
-  return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
-};
-
-const wc_fmtTemp = (v: number | null | undefined, unit: string) =>
-  v == null ? null : `${Math.round(v)}${unit || "°"}`;
-
-const wc_aggregateHourlyToDaily = (hourly: WcForecastItem[], daysWanted: number): WcDaily[] => {
-  const byDay = new Map<string, WcForecastItem[]>();
-  const todayKey = wc_dayKey(new Date());
-
-  for (const h of hourly) {
-    const base =
-      h.datetime ??
-      h.date ??
-      h.time ??
-      (typeof h.dt === "number" ? h.dt : h.dt) ??
-      h.timestamp ??
-      Date.now();
-    const when = new Date(base as any);
-    const key = wc_dayKey(when);
-    if (key < todayKey) continue;
-    if (!byDay.has(key)) byDay.set(key, []);
-    byDay.get(key)!.push(h);
-  }
-
-  const days: WcDaily[] = [];
-  for (const [key, list] of [...byDay.entries()].sort()) {
-    let tMax = -Infinity, tMin = +Infinity;
-    let precipProb: number | null = null;
-    let precipAmt: number | null = null;
-    let wind: number | null = null;
-
-    for (const it of list) {
-      const t = wc_num(it.temperature ?? it.temp);
-      if (t != null) {
-        if (t > tMax) tMax = t;
-        if (t < tMin) tMin = t;
-      }
-      const pp = wc_num(it.precipitation_probability ?? it.precipitation_chance);
-      if (pp != null) precipProb = precipProb == null ? pp : Math.max(precipProb, pp);
-
-      const pa = wc_num(it.precipitation);
-      if (pa != null) precipAmt = (precipAmt ?? 0) + pa;
-
-      const ws = wc_num(it.wind_speed ?? it.wind_speed_kmh ?? it.wind_speed_mps);
-      if (ws != null) wind = wind == null ? ws : Math.max(wind, ws);
-    }
-    if (!Number.isFinite(tMax)) tMax = null as any;
-    if (!Number.isFinite(tMin)) tMin = null as any;
-
-    const cond = wc_mode(
-      list
-        .map((it) => it.condition ?? it.condition_description ?? it.symbol ?? it.state)
-        .filter(Boolean) as string[]
-    ) ?? "-";
-
-    days.push({
-      key,
-      datetime: `${key}T12:00:00`,
-      condition: cond,
-      temperature: tMax as any,
-      templow: tMin as any,
-      precipitation_probability: precipProb,
-      precipitation: precipAmt,
-      wind_speed: wind,
-    });
-
-    if (days.length >= daysWanted) break;
-  }
-  return days;
-};
-
-const wc_fetchViaService = async (hass: any, entityId: string, type: "daily" | "hourly"): Promise<WcForecastItem[]> => {
-  const resp = await hass.callWS({
-    type: "call_service",
-    domain: "weather",
-    service: "get_forecasts",
-    service_data: { entity_id: entityId, type },
-    return_response: true,
-  });
-  const payload = resp?.response ?? resp ?? {};
-  const data = payload[entityId] ?? payload;
-  const list = data?.forecast ?? [];
-  return Array.isArray(list) ? (list as WcForecastItem[]) : [];
-};
-
-class WeatherInlineCache {
-  private _hass: any | null = null;
-  private _entity = "";
-  private _days = 7;
-  private _lastChanged?: string;
-  private _unit = "°";
-  private _byKey = new Map<string, WcDaily>();
-
-  constructor(entity: string, days = 7) {
-    this._entity = entity;
-    this._days = days;
-  }
-
-  setHass(hass: any) {
-    this._hass = hass;
-    const st = hass?.states?.[this._entity];
-    if (st) this._unit = st.attributes?.temperature_unit ?? "°";
-  }
-
-  get unit() { return this._unit; }
-
-  get(key: string): WcDaily | undefined {
-    return this._byKey.get(key);
-  }
-
-  keys(): string[] {
-    return [...this._byKey.keys()];
-  }
-
-  async refreshIfNeeded(): Promise<void> {
-    if (!this._hass) return;
-    const st = this._hass.states?.[this._entity];
-    if (!st) return;
-
-    if (this._lastChanged === st.last_changed && this._byKey.size) return;
-    this._lastChanged = st.last_changed;
-
-    // 1) WS daily
-    let items = await wc_fetchViaService(this._hass, this._entity, "daily");
-
-    // 2) WS hourly → aggregate
-    if (!items?.length) {
-      const hourly = await wc_fetchViaService(this._hass, this._entity, "hourly");
-      if (hourly?.length) items = wc_aggregateHourlyToDaily(hourly, this._days) as any;
-    }
-
-    // 3) attributes.forecast last resort
-    if (!items?.length) {
-      const attrList = st.attributes?.forecast;
-      if (Array.isArray(attrList) && attrList.length) {
-        items = attrList;
-      }
-    }
-
-    // Normalize to WcDaily
-    const normalized: WcDaily[] = (items as any[]).map((f) => {
-      const dt = new Date(f.datetime || f.date || f.time || f.dt || f.timestamp || Date.now());
-      const key = wc_dayKey(dt);
-      return {
-        key,
-        datetime: `${key}T12:00:00`,
-        condition: (f.condition ?? f.condition_description ?? f.symbol ?? f.state ?? "-").toString(),
-        temperature: wc_num(f.temperature ?? f.temperature_high ?? f.temp),
-        templow: wc_num(f.templow ?? f.temperature_low),
-        precipitation_probability: wc_num(f.precipitation_probability ?? f.precipitation_chance),
-        precipitation: wc_num(f.precipitation),
-        wind_speed: wc_num(f.wind_speed ?? f.wind_speed_kmh ?? f.wind_speed_mps),
-      };
-    });
-
-    this._byKey.clear();
-    for (const d of normalized) if (!this._byKey.has(d.key)) this._byKey.set(d.key, d);
-    const keys = [...this._byKey.keys()].sort().slice(0, this._days);
-    const pruned = new Map<string, WcDaily>();
-    for (const k of keys) pruned.set(k, this._byKey.get(k)!);
-    this._byKey = pruned;
-  }
-
-  renderHeaderPill(d: Date) {
-    const day = this.get(wc_dayKey(d));
-    if (!day) return nothing;
-
-    const icon = wc_icon(day.condition);
-    const hi = wc_fmtTemp(day.temperature, this._unit) ?? "–";
-    const lo = day.templow != null ? wc_fmtTemp(day.templow, this._unit) : null;
-    const rr = day.precipitation_probability;
-    const ra = day.precipitation;
-
-    return html`
-      <div class="wc-pill" title=${day.condition}>
-        <ha-icon class="wc-icon" .icon=${icon}></ha-icon>
-        <span class="wc-temp">${hi}${lo ? html`<span class="wc-sep">/</span>${lo}` : nothing}</span>
-        ${rr != null ? html`<span class="wc-meta">· ${Math.round(rr)}%</span>` : nothing}
-        ${ra != null ? html`<span class="wc-meta">· ${Math.round(ra)}mm</span>` : nothing}
-      </div>
-    `;
-  }
-
-  static styles = `
-    .wc-pill{display:inline-flex;align-items:center;gap:.35rem;font:inherit}
-    .wc-icon{--mdc-icon-size:20px}
-    .wc-temp{font-weight:600}
-    .wc-sep{color:var(--secondary-text-color);margin:0 .125rem}
-    .wc-meta{color:var(--secondary-text-color);margin-left:.25rem;font-size:.9em}
-  `;
-}
-
-type WcGlue = {
-  wc_setWeather(hass:any, entity:string, days?:number): void;
-  wc_refreshWeather(): Promise<void>;
-  wc_weatherPillFor(date: Date): any; // TemplateResult|nothing
-  wc_weatherUnit(): string;
-  wc_weatherCss(): string;
-};
-
-const makeWeatherGlue = (): WcGlue => {
-  let cache: WeatherInlineCache | null = null;
-
-  return {
-    wc_setWeather(hass, entity, days = 7) {
-      if (!entity) { cache = null; return; }
-      cache = new WeatherInlineCache(entity, days);
-      cache.setHass(hass);
-    },
-    async wc_refreshWeather() {
-      if (cache) await cache.refreshIfNeeded();
-    },
-    wc_weatherPillFor(date: Date) {
-      return cache ? cache.renderHeaderPill(date) : nothing;
-    },
-    wc_weatherUnit() { return cache ? cache.unit : "°"; },
-    wc_weatherCss() { return WeatherInlineCache.styles; },
-  };
-};
-/* ============================================================================
-   END: Inline Weather Helpers
-   ========================================================================== */
-
-
-/* ============================================================================
-   Multi Calendar Grid Card (baseline)
-   ========================================================================== */
-
-interface MultiCalendarGridCardConfig {
+export type MultiCalendarGridCardConfig = {
   type: string;
-  title?: string;
-  weeks?: number;             // default 6
-  start_week_on?: number;     // 0=Sun..6=Sat (default 1 = Mon)
-  weather_entity?: string;    // e.g. weather.integra_langsbau_1_3
-  weather_days?: number;      // default 7
+  entities: EntityCfg[];
+
+  /** Original: start of week day (1=Mon). Only used if start_from_today=false */
+  first_day?: number;
+
+  /** NEW: roll the 7-day grid from *today* (default: true) */
+  start_from_today?: boolean;
+
+  slot_min_time?: string;
+  slot_max_time?: string;
+  slot_minutes?: number;
+  locale?: string;
+  show_now_indicator?: boolean;
+  show_all_day?: boolean;
+  height_vh?: number;
+  remember_offset?: boolean;
+  header_compact?: boolean;
+  data_refresh_minutes?: number;
+  px_per_min?: number;
+
+  /** (kept for compatibility, but weather is handled by DOM addon) */
+  weather_entity?: string;
+  weather_days?: number;
+  weather_compact?: boolean;
+};
+
+/* -------------------------------- Utilities ------------------------------- */
+
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+
+const timeHHMMSS = (v?: string) => /^\d{2}:\d{2}:\d{2}$/.test(String(v || ""));
+
+const minutesOf = (hhmmss: string) => {
+  const [h, m, s] = hhmmss.split(":").map(Number);
+  return h * 60 + m + (s || 0) / 60;
+};
+
+const startOfWeek = (d: Date, firstDay: number) => {
+  const e = new Date(d);
+  const s = (e.getDay() + 7 - (firstDay % 7)) % 7;
+  e.setHours(0, 0, 0, 0);
+  e.setDate(e.getDate() - s);
+  return e;
+};
+
+const addMinutes = (d: Date, mins: number) => {
+  const e = new Date(d);
+  e.setMinutes(e.getMinutes() + mins);
+  return e;
+};
+
+const hexOrVar = (raw?: string) => {
+  const v = String(raw || "").trim();
+  if (!v) return { raw: "#3366cc", hex: "#3366cc" };
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v)) return { raw: v, hex: v };
+  if (/^rgba?\(/i.test(v)) return { raw: v, hex: null };
+  if (/^var\(--/.test(v)) return { raw: v, hex: null };
+  return { raw: "#3366cc", hex: "#3366cc" };
+};
+
+const hexToRGB = (hex: string) => {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return m
+    ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) }
+    : { r: 51, g: 102, b: 204 };
+};
+
+const textColorOn = (hex: string) => {
+  const { r, g, b } = hexToRGB(hex);
+  const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luma > 0.6 ? "#111" : "#fff";
+};
+
+const rgbaOf = (hex: string, alpha = 0.55) => {
+  const { r, g, b } = hexToRGB(hex);
+  return `rgba(${r},${g},${b},${alpha})`;
+};
+
+function hashStable(s: string) {
+  let t = 5381;
+  for (let i = 0; i < s.length; i++) t = (t * 33) ^ s.charCodeAt(i);
+  return (t >>> 0).toString(36);
 }
 
+/* ------------------------------- Card Class -------------------------------- */
+
+@customElement(CARD_TAG)
 export class MultiCalendarGridCard extends LitElement {
-  // Home Assistant will set/get this property. Use single accessor pair.
-  private _hass: any | null = null;
-  get hass(): any | null { return this._hass; }
-  set hass(value: any | null) {
-    this._hass = value;
-    if (!value || !this._config) return;
+  static version = CARD_VERSION;
 
-    // Weather init + refresh
-    if (this._weatherConfigured) {
-      this._weather.wc_setWeather(
-        this._hass,
-        this._config.weather_entity!,
-        this._config.weather_days ?? 7
-      );
-      this._weather.wc_refreshWeather().then(() => this.requestUpdate());
-    }
+  /** HA will set this property for us. Keep it un-decorated to avoid decorator type issues. */
+  public hass: any;
 
-    // Recompute days (cheap)
-    this._recomputeDays();
-  }
+  @state() private _config!: MultiCalendarGridCardConfig;
+  @state() private _weekOffset = 0;
+  @state() private _error: string | null = null;
+  @state() private _weekStart!: Date;
+  @state() private _days: Array<{
+    date: Date;
+    allDay: any[];
+    timed: Array<{ n: any; top: number; height: number; lane: number }>;
+    laneCount: number;
+  }> = [];
 
-  // Config and state
-  private _config!: MultiCalendarGridCardConfig;
-  private _weather: WcGlue = makeWeatherGlue();
-  private _weatherConfigured = false;
+  @state() private _dialogOpen = false;
+  @state() private _dialogEvent: any | undefined;
 
-  private _baseDate: Date = new Date(); // today
-  private _days: Date[] = [];
+  private _lastFetchId = 0;
+  private _tick?: number;
+  private _refresh?: number;
+  private _nsBase = "";
 
-  public setConfig(config: MultiCalendarGridCardConfig) {
-    // Accept relaxed type check; HA passes type in lovelace
-    this._config = {
-      weeks: 6,
-      start_week_on: undefined,
-      ...config,
+  /* -------------------------- Lovelace integration ------------------------- */
+
+  static async getStubConfig(hass: any): Promise<MultiCalendarGridCardConfig> {
+    const states = hass?.states || {};
+    const cals = Object.keys(states).filter((k) => k.startsWith("calendar.")).slice(0, 2);
+    const palette = ["#3f51b5", "#9c27b0", "#03a9f4", "#009688", "#ff9800", "#e91e63"];
+    const entities: EntityCfg[] =
+      cals.length > 0
+        ? cals.map((id, i) => ({
+            entity: id,
+            name: states[id]?.attributes?.friendly_name || id,
+            color: palette[i % palette.length],
+          }))
+        : [{ entity: "calendar.calendar", name: "Calendar", color: palette[0] }];
+    return {
+      type: CARD_TYPE,
+      entities,
+      // sensible dev defaults
+      first_day: 1,
+      start_from_today: true,
+      slot_min_time: "07:00:00",
+      slot_max_time: "22:00:00",
+      slot_minutes: 30,
+      locale: "en",
+      show_now_indicator: true,
+      show_all_day: true,
+      remember_offset: true,
+      header_compact: false,
+      height_vh: 80,
+      data_refresh_minutes: 5,
+      px_per_min: 1.6,
     };
-    this._weatherConfigured = !!this._config.weather_entity;
-    this._recomputeDays();
   }
 
-  // Build a N-week grid for the month of _baseDate
-  private _recomputeDays() {
-    const weeks = this._config?.weeks ?? 6;
-    const startOn =
-      typeof this._config?.start_week_on === "number"
-        ? this._config.start_week_on!
-        : 1; // default Monday
+  static getConfigElement() {
+    const el = document.createElement("div");
+    el.innerHTML = `<div style="padding:8px">Use YAML to configure this card. Editor coming later. (v${CARD_VERSION})</div>`;
+    return el;
+  }
 
-    const firstOfMonth = new Date(this._baseDate.getFullYear(), this._baseDate.getMonth(), 1);
-    const firstDow = firstOfMonth.getDay(); // 0..6 (Sun..Sat)
-
-    // Compute offset from desired week start
-    let delta = firstDow - startOn;
-    if (delta < 0) delta += 7;
-
-    const gridStart = new Date(firstOfMonth);
-    gridStart.setDate(firstOfMonth.getDate() - delta);
-
-    const totalDays = weeks * 7;
-    const days: Date[] = [];
-    for (let i = 0; i < totalDays; i++) {
-      const d = new Date(gridStart);
-      d.setDate(gridStart.getDate() + i);
-      days.push(d);
+  public setConfig(cfg: MultiCalendarGridCardConfig) {
+    if (!cfg || !Array.isArray(cfg.entities) || cfg.entities.length === 0) {
+      throw new Error("Config must include at least one entity in 'entities'.");
     }
-    this._days = days;
-    this.requestUpdate();
-  }
+    if (!timeHHMMSS(cfg.slot_min_time)) throw new Error("slot_min_time must be HH:MM:SS");
+    if (!timeHHMMSS(cfg.slot_max_time)) throw new Error("slot_max_time must be HH:MM:SS");
 
-  private _prevMonth = () => {
-    const d = new Date(this._baseDate);
-    d.setMonth(d.getMonth() - 1);
-    this._baseDate = d;
-    this._recomputeDays();
-    if (this._weatherConfigured) this._weather.wc_refreshWeather();
-  };
+    const mins = Number(cfg.slot_minutes ?? DEFAULTS.slot_minutes);
+    if (!Number.isFinite(mins) || mins <= 0 || mins > 180) {
+      throw new Error("slot_minutes must be a number between 1 and 180.");
+    }
 
-  private _nextMonth = () => {
-    const d = new Date(this._baseDate);
-    d.setMonth(d.getMonth() + 1);
-    this._baseDate = d;
-    this._recomputeDays();
-    if (this._weatherConfigured) this._weather.wc_refreshWeather();
-  };
+    // merge defaults
+    this._config = {
+      ...DEFAULTS,
+      ...cfg,
+      start_from_today: cfg.start_from_today ?? true,
+    };
 
-  private _today = () => {
-    this._baseDate = new Date();
-    this._recomputeDays();
-    if (this._weatherConfigured) this._weather.wc_refreshWeather();
-  };
-
-  private _isSameDay(a: Date, b: Date) {
-    return (
-      a.getFullYear() === b.getFullYear() &&
-      a.getMonth() === b.getMonth() &&
-      a.getDate() === b.getDate()
-    );
-  }
-
-  private _inCurrentMonth(d: Date) {
-    return d.getMonth() === this._baseDate.getMonth();
-  }
-
-  static get styles() {
-    return css`
-      :host {
-        display: block;
-      }
-      .header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 8px;
-      }
-      .title {
-        font-weight: 600;
-      }
-      .subtitle {
-        color: var(--secondary-text-color);
-        font-size: 12px;
-      }
-      .nav {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-      .nav button {
-        background: var(--primary-background-color);
-        border: 1px solid var(--divider-color);
-        border-radius: 8px;
-        padding: 6px 10px;
-        cursor: pointer;
-        color: var(--primary-text-color);
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        gap: 8px;
-      }
-      .dow {
-        text-align: center;
-        font-weight: 600;
-        color: var(--secondary-text-color);
-        margin-bottom: 4px;
-      }
-      .cell {
-        border: 1px solid var(--divider-color);
-        border-radius: 10px;
-        min-height: 86px;
-        padding: 8px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .cell.dimmed {
-        opacity: 0.6;
-      }
-      .dayhead {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-      }
-      .daynum {
-        font-weight: 600;
-      }
-      .today {
-        color: var(--primary-color);
-      }
-      /* Weather pill styles (inline string duplicated for simplicity) */
-      .wc-pill{display:inline-flex;align-items:center;gap:.35rem;font:inherit}
-      .wc-icon{--mdc-icon-size:20px}
-      .wc-temp{font-weight:600}
-      .wc-sep{color:var(--secondary-text-color);margin:0 .125rem}
-      .wc-meta{color:var(--secondary-text-color);margin-left:.25rem;font-size:.9em}
-      .status {
-        color: var(--secondary-text-color);
-        font-size: 12px;
-        margin-top: 6px;
-      }
-      .version {
-        color: var(--secondary-text-color);
-        font-size: 11px;
-        margin-top: 6px;
-        text-align: right;
-      }
-    `;
-  }
-
-  render() {
-    if (!this._config) return nothing;
-
-    const monthLabel = this._baseDate.toLocaleDateString(undefined, {
-      month: "long",
-      year: "numeric",
+    // namespace for localStorage
+    const stable = JSON.stringify({
+      entities: this._config.entities.map((e) => e.entity).sort(),
+      first_day: this._config.first_day,
+      start_from_today: this._config.start_from_today,
     });
-    const titleToShow = this._config.title ?? monthLabel;
+    this._nsBase = `${CARD_TYPE}.${hashStable(stable)}`;
 
-    // Weekday labels (start day configurable)
-    const startOn =
-      typeof this._config?.start_week_on === "number"
-        ? this._config.start_week_on!
-        : 1; // default Monday
-    const weekLabels: string[] = [];
-    for (let i = 0; i < 7; i++) {
-      const day = (startOn + i) % 7;
-      const d = new Date(2024, 0, 7 + day); // a Sunday-based week reference
-      weekLabels.push(
-        d.toLocaleDateString(undefined, { weekday: "short" })
-      );
+    // restore offset
+    try {
+      if (this._config.remember_offset) {
+        const off = Number(localStorage.getItem(`${this._nsBase}.weekOffset`));
+        this._weekOffset = Number.isFinite(off) ? off : 0;
+      } else {
+        this._weekOffset = 0;
+      }
+    } catch {
+      this._weekOffset = 0;
     }
 
-    return html`
-      <ha-card>
-        <div class="header">
-          <div class="title">
-            ${titleToShow}
-            <div class="subtitle">
-              ${this._config.title ? monthLabel : nothing}
-            </div>
-            <div class="status">
-              ${this._config.weather_entity
-                ? html`Weather: <code>${this._config.weather_entity}</code> · ${WC_INLINE_VERSION}`
-                : nothing}
-            </div>
-          </div>
-          <div class="nav">
-            <button @click=${this._prevMonth} title="Previous month">‹</button>
-            <button @click=${this._today} title="Go to today">Today</button>
-            <button @click=${this._nextMonth} title="Next month">›</button>
-          </div>
-        </div>
-
-        <!-- Day of week header row -->
-        <div class="grid">
-          ${weekLabels.map((lbl) => html`<div class="dow">${lbl}</div>`)}
-        </div>
-
-        <!-- Month grid -->
-        <div class="grid">
-          ${this._days.map((d) => {
-            const inMonth = this._inCurrentMonth(d);
-            const isToday = this._isSameDay(d, new Date());
-            const weatherPill =
-              this._config.weather_entity ? this._weather.wc_weatherPillFor(d) : nothing;
-
-            return html`
-              <div class="cell ${inMonth ? "" : "dimmed"}">
-                <div class="dayhead">
-                  <div class="daynum ${isToday ? "today" : ""}">
-                    ${d.getDate()}
-                  </div>
-                  <div>${weatherPill}</div>
-                </div>
-
-                <!-- TODO: Insert your event list for this day here. -->
-              </div>
-            `;
-          })}
-        </div>
-
-        <div class="version">Multi Calendar Grid Card v1.0.2-weather-inline</div>
-      </ha-card>
-    `;
+    this._recomputeWeekStart();
   }
 
-  getCardSize() {
-    // Rough estimate to keep HA happy in masonry layout
-    return 6;
+  public getCardSize(): number {
+    const vh = Number(this._config?.height_vh || 80);
+    const px = Math.max(300, vh * 7);
+    return Math.ceil(px / 50);
   }
-}
 
-// Safe define (avoid duplicate define errors during live reload)
-const TAG = "multi-calendar-grid-card";
-if (!customElements.get(TAG)) {
-  customElements.define(TAG, MultiCalendarGridCard);
-}
-
-declare global {
-  interface HTMLElementTagNameMap {
-    "multi-calendar-grid-card": MultiCalendarGridCard;
+  connectedCallback(): void {
+    super.connectedCallback();
+    this._startTimers();
   }
-}
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._stopTimers();
+  }
+
+  firstUpdated(): void {
+    this._restoreScroll();
+  }
+
+  updated(changed: PropertyValues<this>): void {
+    if (changed.has("_config")) {
+      this._recomputeWeekStart();
+      this._fetchEvents();
+      this.updateComplete.then(() => this._restoreScroll());
+    }
+  }
+
+  /* ------------------------------- Timers ---------------------------------- */
+
+  private _startTimers() {
+    this._stopTimers();
+    this._tick = window.setInterval(() => this.requestUpdate(), 60 * 1000);
+    const mins = clamp(Number(this._config?.data_refresh_minutes) || 5, 1, 60);
+    this._refresh = window.setInterval(() => this._fetchEvents(), mins * 60 * 1000);
+  }
+
+  private _stopTimers() {
+    if (this._tick) window.clearInterval(this._tick);
+    if (this._
