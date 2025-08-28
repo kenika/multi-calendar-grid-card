@@ -422,10 +422,10 @@ export class MultiCalendarGridCard extends LitElement {
     };
   }
 
-  static getConfigElement() {
-    const el = document.createElement("div");
-    el.innerHTML = `<div style="padding:8px">Use YAML to configure this card. Editor coming later. (v${VERSION})</div>`;
-    return el;
+  // Visual editor registration
+  static async getConfigElement() {
+    await import("./editor/multi-calendar-grid-card-editor");
+    return document.createElement("multi-calendar-grid-card-editor");
   }
 
   /** Config */
@@ -622,7 +622,7 @@ export class MultiCalendarGridCard extends LitElement {
         }
       } catch (e) {
         failed.push(ent.name || ent.entity);
-        console.error("Calendar fetch failed:", ent.entity, e);
+        // (no console.*) — errors surface via UI badge message already
       }
     }
 
