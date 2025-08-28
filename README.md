@@ -27,8 +27,9 @@ Tested on **Home Assistant 2025.8**. Should work on 2024.12+.
 ### 1) Download the release asset
 Grab `multi-calendar-grid-card.js` from the latest GitHub Release and place it at:
 
+```
 /config/www/multi-calendar-grid-card/multi-calendar-grid-card.js
-
+```
 
 ### 2) Add a Lovelace resource
 **Settings → Dashboards → (⋮) Resources → + Add resource**
@@ -75,54 +76,60 @@ data_refresh_minutes: 5
 weather_entity: weather.integra_langsbau_1_3
 weather_days: 7            # default 7
 weather_compact: false     # false = show icon + hi/low; true = tighter
-Options
-Key	Type	Default	Description
-entities	list	—	Calendars to overlay. Each item: { entity, name?, color? }.
-first_day	number (0–6)	1	Week start (Mon=1). Used only when start_today: false.
-start_today	boolean	true	NEW. When true, the 7-day view starts at today (rolling window).
-slot_min_time	HH:MM:SS	07:00:00	Earliest visible hour.
-slot_max_time	HH:MM:SS	22:00:00	Latest visible hour.
-slot_minutes	number	30	Minor grid step in minutes (1–180).
-px_per_min	number	1.6	Vertical scale: pixels per minute.
-height_vh	number	80	Scroll area height in viewport units.
-header_compact	boolean	false	Smaller top header.
-show_now_indicator	boolean	true	Red “now” line when viewing the current week.
-show_all_day	boolean	true	Show all-day pill row.
-remember_offset	boolean	true	Persist vertical scroll between reloads.
-data_refresh_minutes	number	5	Re-fetch calendars every N minutes (1–60).
-weather_entity	string	—	Optional weather.* entity to show daily weather in headers.
-weather_days	number	7	Days of weather to show (capped by your forecast).
-weather_compact	boolean	false	Compact weather display in headers.
+```
 
-Troubleshooting
-Weather not showing
+---
 
-Confirm weather_entity exists and is of domain weather.
+## Options
 
-Make sure your dashboard resource points to the new JS file (clear cache after updating).
+| Key                    | Type            | Default | Description |
+|------------------------|-----------------|---------|-------------|
+| `entities`             | list            | —       | Calendars to overlay. Each item: `{ entity, name?, color? }`. |
+| `first_day`            | number (0–6)    | `1`     | Week start (Mon=1). Used only when `start_today: false`. |
+| `start_today`          | boolean         | `true`  | **NEW**. When `true`, the 7-day view starts at today (rolling window). |
+| `slot_min_time`        | `HH:MM:SS`      | `07:00:00` | Earliest visible hour. |
+| `slot_max_time`        | `HH:MM:SS`      | `22:00:00` | Latest visible hour. |
+| `slot_minutes`         | number          | `30`    | Minor grid step in minutes (1–180). |
+| `px_per_min`           | number          | `1.6`   | Vertical scale: pixels per minute. |
+| `height_vh`            | number          | `80`    | Scroll area height in viewport units. |
+| `header_compact`       | boolean         | `false` | Smaller top header. |
+| `show_now_indicator`   | boolean         | `true`  | Red “now” line when viewing the current week. |
+| `show_all_day`         | boolean         | `true`  | Show all-day pill row. |
+| `remember_offset`      | boolean         | `true`  | Persist vertical scroll between reloads. |
+| `data_refresh_minutes` | number          | `5`     | Re-fetch calendars every N minutes (1–60). |
+| `weather_entity`       | string          | —       | Optional `weather.*` entity to show daily weather in headers. |
+| `weather_days`         | number          | `7`     | Days of weather to show (capped by your forecast). |
+| `weather_compact`      | boolean         | `false` | Compact weather display in headers. |
 
-The card reads forecast from the HA weather API and/or entity attributes. Some providers expose only daily or hourly — the card handles common formats.
+---
 
-I still see old code / version
+## Troubleshooting
 
-Hard refresh: Ctrl/Cmd-Shift-R.
+- **Weather not showing**
+  - Confirm `weather_entity` exists and is of domain `weather`.
+  - Make sure your dashboard resource points to the **new** JS file (clear cache after updating).
+  - The card reads forecast from the HA weather API and/or entity attributes. Some providers expose only daily or hourly — the card handles common formats.
 
-If you host both dev/prod copies, double-check the resource path.
+- **I still see old code / version**
+  - Hard refresh: Ctrl/Cmd-Shift-R.
+  - If you host both dev/prod copies, double-check the resource path.
 
-Development
+---
 
+## Development
+
+```bash
 npm ci
 npm run dev     # local dev
 npm run lint    # lint (no warnings allowed in CI)
 npm run build   # produces bundle(s) in dist/
+```
+
 For release, we typically upload a stable-named bundle:
+- `dist/multi-calendar-grid-card.js` (+ optional `.map`)
 
-dist/multi-calendar-grid-card.js (+ optional .map)
+---
 
-License
-See LICENSE.
+## License
 
-
-
-Want me to also re-post the **entire `CHANGELOG.md`** in one block the same way?
-::contentReference[oaicite:0]{index=0}
+See `LICENSE`.
