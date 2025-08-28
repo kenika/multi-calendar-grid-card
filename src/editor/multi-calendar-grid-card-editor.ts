@@ -1,7 +1,6 @@
-import {css, html, LitElement, nothing} from 'lit';
-import {customElement, property, state} from 'lit/decorators.js';
+import { css, html, LitElement, nothing } from 'lit';
 
-type HomeAssistant = any; // Keep dependency-light; HA provides types at runtime
+type HomeAssistant = any;
 type CalendarEntityConfig = {
   entity: string;
   name?: string;
@@ -30,21 +29,25 @@ type CardConfig = {
   weather_compact?: boolean;
 };
 
-@customElement('multi-calendar-grid-card-editor')
 export class MultiCalendarGridCardEditor extends LitElement {
-  @property({attribute: false}) public hass!: HomeAssistant;
-  @state() private _config: CardConfig = {};
-  @state() private _isAdvancedOpen = false;
+  // Reactive properties (no decorators build)
+  static properties = {
+    hass: { attribute: false },
+    _config: { attribute: false, state: true },
+    _isAdvancedOpen: { attribute: false, state: true },
+  };
+
+  public hass!: HomeAssistant;
+  private _config: CardConfig = {};
+  private _isAdvancedOpen = false;
 
   public setConfig(config: CardConfig): void {
-    // Shallow clone to avoid mutating the passed object
     this._config = {
       ...config,
-      entities: (config.entities ?? []).map((e) => ({...e})),
+      entities: (config.entities ?? []).map((e) => ({ ...e })),
     };
   }
 
-  // ----- rendering -----
   protected render() {
     if (!this.hass || !this._config) return nothing;
     return html`
@@ -87,7 +90,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
           .value=${row.entity ?? ''}
           allow-custom-entity
           .domainFilter=${['calendar']}
-          @value-changed=${(e: CustomEvent) => this._updateEntity(idx, 'entity', (e.detail as any).value)}
+          @value-changed=${(e: CustomEvent) => this._updateEntity(idx, 'entity', (e as any).detail.value)}
           label="Calendar entity"
         ></ha-entity-picker>
 
@@ -216,7 +219,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
             .value=${c.weather_entity ?? ''}
             allow-custom-entity
             .domainFilter=${['weather']}
-            @value-changed=${(e: CustomEvent) => this._updateRoot('weather_entity', (e.detail as any).value)}
+            @value-changed=${(e: CustomEvent) => this._updateRoot('weather_entity', (e as any).detail.value)}
             label="Weather entity (optional)"
           ></ha-entity-picker>
 
@@ -307,7 +310,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
   // ----- entities handlers -----
   private _addEntity = () => {
     const entities = [...(this._config.entities ?? [])];
-    entities.push({entity: ''});
+    entities.push({ entity: '' });
     this._updateRoot('entities', entities);
   };
 
@@ -328,7 +331,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
   private _updateEntity(idx: number, key: keyof CalendarEntityConfig, value: unknown) {
     const entities = [...(this._config.entities ?? [])];
-    const row = {...entities[idx], [key]: value as any};
+    const row = { ...entities[idx], [key]: value as any };
     entities[idx] = row;
     this._updateRoot('entities', entities);
   }
@@ -339,12 +342,11 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
   // ----- config change -----
   private _updateRoot(key: keyof CardConfig, value: any) {
-    const newConfig: CardConfig = {...this._config, [key]: value};
-    // Validate min/max relationships that matter
+    const newConfig: CardConfig = { ...this._config, [key]: value };
     if (key === 'slot_min_time' || key === 'slot_max_time') {
       const a = (key === 'slot_min_time' ? value : newConfig.slot_min_time) ?? '00:00:00';
       const b = (key === 'slot_max_time' ? value : newConfig.slot_max_time) ?? '23:59:59';
-      if (!isBefore(a, b)) return; // keep last valid state
+      if (!isBefore(a, b)) return;
     }
     this._config = newConfig;
     this._fireConfigChanged();
@@ -352,7 +354,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
   private _fireConfigChanged() {
     const event = new CustomEvent('config-changed', {
-      detail: {config: this._pruneDefaults({...this._config})},
+      detail: { config: this._pruneDefaults({ ...this._config }) },
       bubbles: true,
       composed: true,
     });
@@ -360,8 +362,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
   }
 
   private _pruneDefaults(cfg: CardConfig): CardConfig {
-    // Drop defaults so stored YAML stays minimal
-    const copy: CardConfig = {...cfg};
+    const copy: CardConfig = { ...cfg };
     if (copy.start_today === true) delete copy.start_today;
     if (copy.first_day === 1) delete copy.first_day;
     if (copy.slot_min_time === '07:00:00') delete copy.slot_min_time;
@@ -377,11 +378,10 @@ export class MultiCalendarGridCardEditor extends LitElement {
     if (copy.weather_days === 7) delete copy.weather_days;
     if (copy.weather_compact === false) delete copy.weather_compact;
 
-    // Clean empty entities
     if (Array.isArray(copy.entities)) {
       copy.entities = copy.entities
         .map((e) => {
-          const r: CalendarEntityConfig = {entity: e.entity ?? ''};
+          const r: CalendarEntityConfig = { entity: e.entity ?? '' };
           if (e.name) r.name = e.name;
           if (e.color) r.color = e.color;
           return r;
@@ -393,7 +393,6 @@ export class MultiCalendarGridCardEditor extends LitElement {
     return copy;
   }
 
-  // ----- styles -----
   static styles = css`
     .editor-root {
       display: grid;
@@ -461,8 +460,9 @@ const mdiArrowUp =
   'M7,15L12,10L17,15H7Z';
 const mdiArrowDown =
   'M7,10L12,15L17,10H7Z';
+const mdiPlus =
+  'M12,5V12H5V14H12V21H14V14H21V12H14V5H12Z';
 
-// Compare two HH:mm(:ss) strings
 function isBefore(a: string, b: string): boolean {
   const ta = toSec(a);
   const tb = toSec(b);
@@ -479,4 +479,9 @@ declare global {
   interface HTMLElementTagNameMap {
     'multi-calendar-grid-card-editor': MultiCalendarGridCardEditor;
   }
+}
+
+// Define element (no decorators)
+if (!customElements.get('multi-calendar-grid-card-editor')) {
+  customElements.define('multi-calendar-grid-card-editor', MultiCalendarGridCardEditor as any);
 }
