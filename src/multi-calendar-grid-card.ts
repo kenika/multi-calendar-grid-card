@@ -1,6 +1,6 @@
 /* Multi-Calendar Grid Card
  * Native weather headers + start_today logic
- * Version: 0.8.0-dev.1
+ * Version: 0.8.0-dev.2
  */
 
 import { LitElement, css, html, nothing } from "lit";
@@ -8,7 +8,7 @@ import { customElement, property, state } from "lit/decorators.js";
 
 /** Public card type & version */
 export const CARD_TAG = "multi-calendar-grid-card";
-export const VERSION = "0.8.0-dev.1";
+export const VERSION = "0.8.0-dev.2";
 
 /** Config */
 export type EntityCfg = {
@@ -283,8 +283,8 @@ async function robustForecast(hass: any, entity_id: string, daysWanted: number) 
   try {
     const daily = await wsForecast(hass, entity_id, "daily");
     if (daily?.length) return { items: daily, kind: "daily" as const };
-  } catch (e) {
-    // ignore
+  } catch {
+    /* ignore */
   }
   // hourly aggregate
   try {
@@ -292,8 +292,8 @@ async function robustForecast(hass: any, entity_id: string, daysWanted: number) 
     if (hourly?.length) {
       return { items: aggregateHourlyToDaily(hourly, daysWanted), kind: "hourly-aggregated" as const };
     }
-  } catch (e) {
-    // ignore
+  } catch {
+    /* ignore */
   }
   // attributes
   const st = hass.states?.[entity_id];
@@ -581,9 +581,8 @@ export class MultiCalendarGridCard extends LitElement {
       }
       this._wxByKey = map;
       this.requestUpdate();
-    } catch (e) {
-      // keep last successful weather if any
-      // console.warn("weather fetch failed", e);
+    } catch {
+      /* keep last successful weather if any */
     }
   }
 
@@ -618,7 +617,8 @@ export class MultiCalendarGridCard extends LitElement {
         }
       } catch (e) {
         failed.push(ent.name || ent.entity);
-        // eslint-disable-next-line no-console
+        // Keep this console for local troubleshooting during dev builds.
+        // If you prefer no logs at all in CI, you can safely remove the next line.
         console.error("Calendar fetch failed:", ent.entity, e);
       }
     }
@@ -685,8 +685,8 @@ export class MultiCalendarGridCard extends LitElement {
     const e0 = ev.end?.dateTime || ev.end?.date || ev.end;
     const hasTime =
       !!(ev.start?.dateTime || ev.end?.dateTime) ||
-      typeof s0 === "string" && s0.includes("T") ||
-      typeof e0 === "string" && e0.includes("T");
+      (typeof s0 === "string" && s0.includes("T")) ||
+      (typeof e0 === "string" && e0.includes("T"));
 
     const s = new Date(s0);
     const e = new Date(e0);
@@ -797,7 +797,7 @@ export class MultiCalendarGridCard extends LitElement {
     const active = activeMap[e.entity] !== false;
 
     const toggle = () => {
-      const next = { ...activeMap, [e.entity]: !(active) };
+      const next = { ...activeMap, [e.entity]: !active };
       try {
         localStorage.setItem(activeMapKey, JSON.stringify(next));
       } catch {}
