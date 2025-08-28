@@ -45,9 +45,8 @@ jobs:
 
           # Is this a tag? support refs/tags/v* and refs/tags/V*
           if [[ "$REF" =~ ^refs/tags/[vV].* ]]; then
-            # Trim prefix "refs/tags/" then remove leading 'v' or 'V'
             TAG="${REF#refs/tags/}"
-            VER="${TAG#[vV]}"
+            VER="${TAG#[vV]}"  # strip leading v/V
             OUT="multi-calendar-grid-card_lit_v${VER}.js"
             IS_TAG="true"
             IS_DEV="false"
@@ -64,8 +63,8 @@ jobs:
             IS_TAG="false"
           fi
 
-          echo "ver=${VER}" >> "$GITHUB_OUTPUT"
-          echo "out=${OUT}" >> "$GITHUB_OUTPUT"
+          echo "ver=${VER}"   >> "$GITHUB_OUTPUT"
+          echo "out=${OUT}"   >> "$GITHUB_OUTPUT"
           echo "is_tag=${IS_TAG}" >> "$GITHUB_OUTPUT"
           echo "is_dev=${IS_DEV}" >> "$GITHUB_OUTPUT"
 
@@ -76,9 +75,13 @@ jobs:
         run: npm run check
 
       - name: Build (inject version + versioned outfile)
+        shell: bash
         run: |
           mkdir -p dist
-          npm run build -- --define:__VERSION__="${{ steps.meta.outputs.ver }}" --outfile=./dist/${{ steps.meta.outputs.out }}
+          # IMPORTANT: pass __VERSION__ as a proper JSON string (quoted)
+          # Note: your package.json likely already sets an --outfile; we pass another one here.
+          # esbuild uses the LAST --outfile, so the versioned name below will be used.
+          npm run build -- --define:__VERSION__='"${{ steps.meta.outputs.ver }}"' --outfile=./dist/${{ steps.meta.outputs.out }}
 
       - name: Copy stable (prod)
         run: cp -f dist/${{ steps.meta.outputs.out }} dist/multi-calendar-grid-card.js
