@@ -1,6 +1,6 @@
 /* Multi-Calendar Grid Card
  * Native weather headers + start_today logic
- * Version: 0.8.0-dev.3 (no decorators build)
+ * Version: 0.8.0-dev.4 (no decorators build)
  */
 
 import { LitElement, css, html, nothing } from "lit";
@@ -331,7 +331,11 @@ export class MultiCalendarGridCard extends LitElement {
   // weather cache (keyed by YYYY-MM-DD)
   private _wxUnit = "°";
   private _wxByKey: Map<string, WxDaily> = new Map();
-  private _lastFetchId = 0;
+
+  // Separate fetch tokens to avoid races between weather & events
+  private _lastEventsFetchId = 0;
+  private _lastWeatherFetchId = 0;
+
   private _tick?: number;
   private _refresh?: number;
   private _nsBase = "";
@@ -433,18 +437,22 @@ export class MultiCalendarGridCard extends LitElement {
     if (!cfg || !Array.isArray(cfg.entities) || cfg.entities.length === 0) {
       throw new Error("Config must include at least one entity in 'entities'.");
     }
-    if (!isHHMMSS(cfg.slot_min_time)) throw new Error("slot_min_time must be HH:MM:SS");
-    if (!isHHMMSS(cfg.slot_max_time)) throw new Error("slot_max_time must be HH:MM:SS");
-    const sm = Number(cfg.slot_minutes ?? DEFAULTS.slot_minutes);
+
+    // Merge defaults first, then validate (so YAML may omit times)
+    const merged: MultiCalendarGridCardConfig = {
+      ...DEFAULTS,
+      ...cfg,
+    };
+
+    if (!isHHMMSS(merged.slot_min_time)) throw new Error("slot_min_time must be HH:MM:SS");
+    if (!isHHMMSS(merged.slot_max_time)) throw new Error("slot_max_time must be HH:MM:SS");
+    const sm = Number(merged.slot_minutes ?? DEFAULTS.slot_minutes);
     if (!Number.isFinite(sm) || sm <= 0 || sm > 180) {
       throw new Error("slot_minutes must be a number between 1 and 180.");
     }
 
-    // Merge defaults
-    this._config = {
-      ...DEFAULTS,
-      ...cfg,
-    };
+    // Save merged config
+    this._config = merged;
 
     // Namespace for localStorage
     const nsKey = JSON.stringify({
@@ -464,6 +472,11 @@ export class MultiCalendarGridCard extends LitElement {
 
     // Compute anchor (today by default)
     this._recomputeAnchor();
+
+    // Kick initial loads immediately (avoid relying only on updated())
+    // and avoid weather/events race via separate tokens
+    this._fetchEvents();
+    this._loadWeather();
   }
 
   /** Card size hint */
@@ -487,6 +500,7 @@ export class MultiCalendarGridCard extends LitElement {
   }
   updated(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("_config") || changed.has("_weekAnchor")) {
+      // These are already kicked in setConfig, but keep as safety on further updates
       this._fetchEvents();
       this._loadWeather();
       this.updateComplete.then(() => this._restoreScroll());
@@ -570,10 +584,10 @@ export class MultiCalendarGridCard extends LitElement {
     }
     this._wxUnit = this.hass.states?.[entity]?.attributes?.temperature_unit || "°";
     const days = clamp(this._config.weather_days ?? 7, 1, 10);
-    const fetchId = ++this._lastFetchId;
+    const fetchId = ++this._lastWeatherFetchId;
     try {
       const { items } = await robustForecast(this.hass, entity, days);
-      if (fetchId !== this._lastFetchId) return;
+      if (fetchId !== this._lastWeatherFetchId) return;
       const map = new Map<string, WxDaily>();
       for (const f of items) {
         const dt = new Date((f.datetime || f.date || f.time) as any || Date.now());
@@ -594,7 +608,7 @@ export class MultiCalendarGridCard extends LitElement {
   /** Calendar data */
   private async _fetchEvents() {
     if (!this.hass) return;
-    const myFetch = ++this._lastFetchId;
+    const myFetch = ++this._lastEventsFetchId;
     this._error = null;
 
     const start = new Date(this._weekAnchor);
@@ -611,7 +625,7 @@ export class MultiCalendarGridCard extends LitElement {
       )}`;
       try {
         const items = await this.hass.callApi("GET", path);
-        if (myFetch !== this._lastFetchId) return;
+        if (myFetch !== this._lastEventsFetchId) return;
         if (Array.isArray(items)) {
           for (const ev of items) {
             ev.__color = ent.color;
@@ -620,9 +634,8 @@ export class MultiCalendarGridCard extends LitElement {
             all.push(ev);
           }
         }
-      } catch (e) {
+      } catch (_e) {
         failed.push(ent.name || ent.entity);
-        // (no console.*) — errors surface via UI badge message already
       }
     }
 
@@ -675,7 +688,7 @@ export class MultiCalendarGridCard extends LitElement {
       days.push({ date: dayStart, allDay: alls, timed, laneCount: Math.max(1, laneEnd.length) });
     }
 
-    if (myFetch === this._lastFetchId) {
+    if (myFetch === this._lastEventsFetchId) {
       this._days = days;
       this._error = failed.length ? `${tr(this._lang(), "failed_load_prefix")} ${failed.join(", ")}` : null;
     }
