@@ -1,6 +1,6 @@
 /* Multi-Calendar Grid Card
  * Native weather headers + start_today logic
- * Version: 0.8.0-dev.5 (no decorators build; static-editor import; soft setConfig)
+ * Version: 0.8.0-dev.6 (static-editor import; soft setConfig; improved Today highlight; no Today pill)
  */
 
 import { LitElement, css, html, nothing } from "lit";
@@ -375,8 +375,9 @@ export class MultiCalendarGridCard extends LitElement {
     .grid{position:relative; display:grid; grid-template-columns:70px repeat(7,1fr); gap:1px; background:var(--divider-color,#e0e0e0)}
     .col{background:var(--card-background-color,#fff); position:relative}
     .col.today{outline:2px solid var(--primary-color); outline-offset:-2px}
+    .col.today .dayhdr{ background: var(--secondary-background-color, rgba(0,0,0,.08)); border-bottom-color: var(--primary-color); }
+    .col.today .body{ background-image: linear-gradient(to bottom, rgba(0,0,0,.03), rgba(0,0,0,.03)); }
     .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
-    .today-pill{border-radius:999px; background:#fff; color: var(--primary-color); font-size:10px; padding:2px 8px}
     .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .timecol{background:var(--card-background-color,#fff); position:relative}
@@ -889,7 +890,7 @@ export class MultiCalendarGridCard extends LitElement {
       out.push(html`
         <div class=${isToday ? "col today" : "col"} style=${`grid-column:${2 + d}/${3 + d}`}>
           <div class=${isToday ? "dayhdr today" : "dayhdr"}>
-            <div>${label} ${isToday ? html`<span class="today-pill">${tr(this._lang(), "today_pill")}</span>` : nothing}</div>
+            <div>${label}</div>
             ${wx}
           </div>
           ${allDay}
