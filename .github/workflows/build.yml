@@ -118,7 +118,6 @@ jobs:
             dist/${{ needs.build.outputs.out }}
             dist/${{ needs.build.outputs.out }}.map
             dist/multi-calendar-grid-card.js
-          overwrite_files: true
           generate_release_notes: true
           make_latest: true
 
@@ -141,7 +140,6 @@ jobs:
           name: Dev Nightly (rolling)
           prerelease: true
           make_latest: false
-          overwrite_files: true
           files: |
             dist/dev/multi-calendar-grid-card.dev.js
             dist/${{ needs.build.outputs.out }}
