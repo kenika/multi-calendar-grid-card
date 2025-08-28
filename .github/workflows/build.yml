@@ -43,7 +43,7 @@ jobs:
         run: |
           REF="${GITHUB_REF}"
 
-          # Is this a tag? support refs/tags/v* and refs/tags/V*
+          # Tag? Support refs/tags/v* and refs/tags/V*
           if [[ "$REF" =~ ^refs/tags/[vV].* ]]; then
             TAG="${REF#refs/tags/}"
             VER="${TAG#[vV]}"  # strip leading v/V
@@ -63,10 +63,10 @@ jobs:
             IS_TAG="false"
           fi
 
-          echo "ver=${VER}"   >> "$GITHUB_OUTPUT"
-          echo "out=${OUT}"   >> "$GITHUB_OUTPUT"
-          echo "is_tag=${IS_TAG}" >> "$GITHUB_OUTPUT"
-          echo "is_dev=${IS_DEV}" >> "$GITHUB_OUTPUT"
+          echo "ver=${VER}"        >> "$GITHUB_OUTPUT"
+          echo "out=${OUT}"        >> "$GITHUB_OUTPUT"
+          echo "is_tag=${IS_TAG}"  >> "$GITHUB_OUTPUT"
+          echo "is_dev=${IS_DEV}"  >> "$GITHUB_OUTPUT"
 
       - name: Lint
         run: npm run lint
@@ -79,8 +79,6 @@ jobs:
         run: |
           mkdir -p dist
           # IMPORTANT: pass __VERSION__ as a proper JSON string (quoted)
-          # Note: your package.json likely already sets an --outfile; we pass another one here.
-          # esbuild uses the LAST --outfile, so the versioned name below will be used.
           npm run build -- --define:__VERSION__='"${{ steps.meta.outputs.ver }}"' --outfile=./dist/${{ steps.meta.outputs.out }}
 
       - name: Copy stable (prod)
@@ -120,6 +118,7 @@ jobs:
             dist/${{ needs.build.outputs.out }}
             dist/${{ needs.build.outputs.out }}.map
             dist/multi-calendar-grid-card.js
+          overwrite_files: true
           generate_release_notes: true
           make_latest: true
 
@@ -142,7 +141,7 @@ jobs:
           name: Dev Nightly (rolling)
           prerelease: true
           make_latest: false
-          allow_updates: true
+          overwrite_files: true
           files: |
             dist/dev/multi-calendar-grid-card.dev.js
             dist/${{ needs.build.outputs.out }}
