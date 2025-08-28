@@ -1,19 +1,17 @@
 /**
  * Multi Calendar Grid Card (baseline with inline weather)
- * Version: 1.0.1-weather-inline
+ * Version: 1.0.2-weather-inline
  *
  * Notes:
- * - Self-contained; no external helpers.
- * - Weather pill uses the same WS logic that worked in the sandbox:
- *     weather.get_forecasts (daily → hourly aggregate → attributes fallback).
- * - You can add your existing event rendering back where indicated.
+ * - No decorators used (avoids TS/ES decorator config issues in CI).
+ * - Single hass accessor (no duplicates).
+ * - Inline weather pill uses WS daily → hourly aggregate → attributes fallback.
  */
 
-import { LitElement, html, css, nothing, CSSResultGroup } from "lit";
-import { property, state } from "lit/decorators.js";
+import { LitElement, html, css, nothing } from "lit";
 
 /* ============================================================================
-   BEGIN: Inline Weather Helpers (no external files)
+   BEGIN: Inline Weather Helpers (self-contained)
    ========================================================================== */
 
 type WcForecastItem = {
@@ -55,7 +53,7 @@ type WcDaily = {
   wind_speed?: number | null;
 };
 
-const WC_INLINE_VERSION = "inline-weather 0.3.3";
+const WC_INLINE_VERSION = "inline-weather 0.4.0";
 
 const wc_num = (v: any): number | null => {
   const n = Number(v);
@@ -128,9 +126,9 @@ const wc_aggregateHourlyToDaily = (hourly: WcForecastItem[], daysWanted: number)
   const days: WcDaily[] = [];
   for (const [key, list] of [...byDay.entries()].sort()) {
     let tMax = -Infinity, tMin = +Infinity;
-    let precipProb = null as number | null;
-    let precipAmt = null as number | null;
-    let wind = null as number | null;
+    let precipProb: number | null = null;
+    let precipAmt: number | null = null;
+    let wind: number | null = null;
 
     for (const it of list) {
       const t = wc_num(it.temperature ?? it.temp);
@@ -293,7 +291,7 @@ class WeatherInlineCache {
   `;
 }
 
-export type WcGlue = {
+type WcGlue = {
   wc_setWeather(hass:any, entity:string, days?:number): void;
   wc_refreshWeather(): Promise<void>;
   wc_weatherPillFor(date: Date): any; // TemplateResult|nothing
@@ -301,7 +299,7 @@ export type WcGlue = {
   wc_weatherCss(): string;
 };
 
-export const makeWeatherGlue = (): WcGlue => {
+const makeWeatherGlue = (): WcGlue => {
   let cache: WeatherInlineCache | null = null;
 
   return {
@@ -333,75 +331,53 @@ interface MultiCalendarGridCardConfig {
   type: string;
   title?: string;
   weeks?: number;             // default 6
-  start_week_on?: number;     // 0=Sun..6=Sat (default from browser locale heuristic: Mon=1)
+  start_week_on?: number;     // 0=Sun..6=Sat (default 1 = Mon)
   weather_entity?: string;    // e.g. weather.integra_langsbau_1_3
   weather_days?: number;      // default 7
 }
 
 export class MultiCalendarGridCard extends LitElement {
-  @property({ attribute: false }) public hass: any;
-  @state() private _config!: MultiCalendarGridCardConfig;
-
-  // Weather glue
-  private _weather = makeWeatherGlue();
-  private _weatherConfigured = false;
-
-  // Calendar grid state
-  @state() private _baseDate: Date = new Date(); // today; center month around this
-  @state() private _days: Date[] = [];
-
-  setConfig(config: MultiCalendarGridCardConfig) {
-    if (!config || config.type !== "custom:multi-calendar-grid-card") {
-      // allow relaxed: if type missing, still accept
-    }
-    this._config = {
-      weeks: 6,
-      start_week_on: undefined,
-      ...config,
-    };
-    this._weatherConfigured = !!this._config.weather_entity;
-
-    // Prepare days immediately
-    this._recomputeDays();
-  }
-
-  set hassProxy(h: any) { this.hass = h; } // (compat)
-
-  setHassInternal(hass: any) {
-    this.hass = hass;
-  }
-
-  set hassSetter(hass: any) {
-    this.hass = hass;
-  }
-
-  set hassUnsafe(hass: any) {
-    this.hass = hass;
-  }
-
-  set hass(hass: any) {
-    (this as any)._hass = hass;
-    if (!hass || !this._config) return;
+  // Home Assistant will set/get this property. Use single accessor pair.
+  private _hass: any | null = null;
+  get hass(): any | null { return this._hass; }
+  set hass(value: any | null) {
+    this._hass = value;
+    if (!value || !this._config) return;
 
     // Weather init + refresh
     if (this._weatherConfigured) {
       this._weather.wc_setWeather(
-        this.hass,
+        this._hass,
         this._config.weather_entity!,
         this._config.weather_days ?? 7
       );
       this._weather.wc_refreshWeather().then(() => this.requestUpdate());
     }
 
-    // Recompute when month or locale might change (cheap)
+    // Recompute days (cheap)
     this._recomputeDays();
   }
 
-  get hass() {
-    return (this as any)._hass;
+  // Config and state
+  private _config!: MultiCalendarGridCardConfig;
+  private _weather: WcGlue = makeWeatherGlue();
+  private _weatherConfigured = false;
+
+  private _baseDate: Date = new Date(); // today
+  private _days: Date[] = [];
+
+  public setConfig(config: MultiCalendarGridCardConfig) {
+    // Accept relaxed type check; HA passes type in lovelace
+    this._config = {
+      weeks: 6,
+      start_week_on: undefined,
+      ...config,
+    };
+    this._weatherConfigured = !!this._config.weather_entity;
+    this._recomputeDays();
   }
 
-  // Build a 6-week (or user-configured) grid for the month of _baseDate
+  // Build a N-week grid for the month of _baseDate
   private _recomputeDays() {
     const weeks = this._config?.weeks ?? 6;
     const startOn =
@@ -427,29 +403,30 @@ export class MultiCalendarGridCard extends LitElement {
       days.push(d);
     }
     this._days = days;
+    this.requestUpdate();
   }
 
-  private _prevMonth() {
+  private _prevMonth = () => {
     const d = new Date(this._baseDate);
     d.setMonth(d.getMonth() - 1);
     this._baseDate = d;
     this._recomputeDays();
     if (this._weatherConfigured) this._weather.wc_refreshWeather();
-  }
+  };
 
-  private _nextMonth() {
+  private _nextMonth = () => {
     const d = new Date(this._baseDate);
     d.setMonth(d.getMonth() + 1);
     this._baseDate = d;
     this._recomputeDays();
     if (this._weatherConfigured) this._weather.wc_refreshWeather();
-  }
+  };
 
-  private _today() {
+  private _today = () => {
     this._baseDate = new Date();
     this._recomputeDays();
     if (this._weatherConfigured) this._weather.wc_refreshWeather();
-  }
+  };
 
   private _isSameDay(a: Date, b: Date) {
     return (
@@ -463,7 +440,7 @@ export class MultiCalendarGridCard extends LitElement {
     return d.getMonth() === this._baseDate.getMonth();
   }
 
-  static get styles(): CSSResultGroup {
+  static get styles() {
     return css`
       :host {
         display: block;
@@ -550,7 +527,7 @@ export class MultiCalendarGridCard extends LitElement {
   }
 
   render() {
-    if (!this.hass || !this._config) return nothing;
+    if (!this._config) return nothing;
 
     const monthLabel = this._baseDate.toLocaleDateString(undefined, {
       month: "long",
@@ -595,9 +572,7 @@ export class MultiCalendarGridCard extends LitElement {
 
         <!-- Day of week header row -->
         <div class="grid">
-          ${weekLabels.map(
-            (lbl) => html`<div class="dow">${lbl}</div>`
-          )}
+          ${weekLabels.map((lbl) => html`<div class="dow">${lbl}</div>`)}
         </div>
 
         <!-- Month grid -->
@@ -605,9 +580,9 @@ export class MultiCalendarGridCard extends LitElement {
           ${this._days.map((d) => {
             const inMonth = this._inCurrentMonth(d);
             const isToday = this._isSameDay(d, new Date());
-            const weatherPill = this._weatherConfigured
-              ? this._weather.wc_weatherPillFor(d)
-              : nothing;
+            const weatherPill =
+              this._config.weather_entity ? this._weather.wc_weatherPillFor(d) : nothing;
+
             return html`
               <div class="cell ${inMonth ? "" : "dimmed"}">
                 <div class="dayhead">
@@ -617,14 +592,13 @@ export class MultiCalendarGridCard extends LitElement {
                   <div>${weatherPill}</div>
                 </div>
 
-                <!-- TODO: Insert your event list for this day here.
-                     You can render your existing per-day events below. -->
+                <!-- TODO: Insert your event list for this day here. -->
               </div>
             `;
           })}
         </div>
 
-        <div class="version">Multi Calendar Grid Card v1.0.1-weather-inline</div>
+        <div class="version">Multi Calendar Grid Card v1.0.2-weather-inline</div>
       </ha-card>
     `;
   }
@@ -635,7 +609,11 @@ export class MultiCalendarGridCard extends LitElement {
   }
 }
 
-customElements.define("multi-calendar-grid-card", MultiCalendarGridCard);
+// Safe define (avoid duplicate define errors during live reload)
+const TAG = "multi-calendar-grid-card";
+if (!customElements.get(TAG)) {
+  customElements.define(TAG, MultiCalendarGridCard);
+}
 
 declare global {
   interface HTMLElementTagNameMap {
