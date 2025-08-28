@@ -1,14 +1,13 @@
 /* Multi-Calendar Grid Card
  * Native weather headers + start_today logic
- * Version: 0.8.0-dev.2
+ * Version: 0.8.0-dev.3 (no decorators build)
  */
 
 import { LitElement, css, html, nothing } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
 
 /** Public card type & version */
 export const CARD_TAG = "multi-calendar-grid-card";
-export const VERSION = "0.8.0-dev.2";
+export const VERSION = "0.8.0-dev.3";
 
 /** Config */
 export type EntityCfg = {
@@ -99,7 +98,7 @@ function tr(lang: string | undefined, key: keyof typeof STRINGS["en"]): string {
 
 /** Utils */
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
-const isHHMMSS = (v?: string) => !!String(v || "").match(/^\d{2}:\d{2}:\d{2}$/);
+const isHHMMSS = (v?: string) => /^\d{2}:\d{2}:\d{2}$/.test(String(v || ""));
 const toMinutes = (hhmmss: string) => {
   const [H, M, S] = hhmmss.split(":").map(Number);
   return H * 60 + M + (S || 0) / 60;
@@ -273,35 +272,28 @@ function aggregateHourlyToDaily(hourly: WItem[], daysWanted: number): WItem[] {
       temperature: Number.isFinite(hi) ? hi : undefined,
       templow: Number.isFinite(lo) ? lo : undefined,
       precipitation_probability: pp ?? undefined,
-    });
+    } as WItem);
     if (out.length >= daysWanted) break;
   }
   return out;
 }
 async function robustForecast(hass: any, entity_id: string, daysWanted: number) {
-  // daily
   try {
     const daily = await wsForecast(hass, entity_id, "daily");
-    if (daily?.length) return { items: daily, kind: "daily" as const };
-  } catch {
-    /* ignore */
-  }
-  // hourly aggregate
+    if (daily && daily.length) return { items: daily, kind: "daily" };
+  } catch {}
   try {
     const hourly = await wsForecast(hass, entity_id, "hourly");
-    if (hourly?.length) {
-      return { items: aggregateHourlyToDaily(hourly, daysWanted), kind: "hourly-aggregated" as const };
+    if (hourly && hourly.length) {
+      return { items: aggregateHourlyToDaily(hourly, daysWanted), kind: "hourly-aggregated" };
     }
-  } catch {
-    /* ignore */
-  }
-  // attributes
+  } catch {}
   const st = hass.states?.[entity_id];
   const attr = st?.attributes?.forecast;
   if (Array.isArray(attr) && attr.length) {
-    return { items: attr as WItem[], kind: "attributes" as const };
+    return { items: attr as WItem[], kind: "attributes" };
   }
-  return { items: [] as WItem[], kind: null as const };
+  return { items: [] as WItem[], kind: null as any };
 }
 
 /** Event shaping */
@@ -318,24 +310,23 @@ type CalEvent = {
   raw: CalEventRaw;
 };
 
-@customElement(CARD_TAG)
 export class MultiCalendarGridCard extends LitElement {
   /** HA wiring */
-  @property({ attribute: false }) hass: any;
+  hass: any;
 
-  /** Internal */
-  @state() private _config!: MultiCalendarGridCardConfig;
-  @state() private _error: string | null = null;
-  @state() private _weekOffset = 0;
-  @state() private _weekAnchor!: Date; // start of visible 7-day window
-  @state() private _days: {
+  /** Internal (reactive via static properties) */
+  private _config!: MultiCalendarGridCardConfig;
+  private _error: string | null = null;
+  private _weekOffset = 0;
+  private _weekAnchor!: Date; // start of visible 7-day window
+  private _days: {
     date: Date;
     allDay: CalEvent[];
     timed: { n: CalEvent; top: number; height: number; lane: number }[];
     laneCount: number;
   }[] = [];
-  @state() private _dialogOpen = false;
-  @state() private _dialogEvent?: CalEvent;
+  private _dialogOpen = false;
+  private _dialogEvent?: CalEvent;
 
   // weather cache (keyed by YYYY-MM-DD)
   private _wxUnit = "°";
@@ -345,41 +336,53 @@ export class MultiCalendarGridCard extends LitElement {
   private _refresh?: number;
   private _nsBase = "";
 
+  /** Reactive properties (no decorators) */
+  static properties = {
+    hass: { attribute: false },
+    _config: { attribute: false, state: true },
+    _error: { attribute: false, state: true },
+    _weekOffset: { attribute: false, state: true },
+    _weekAnchor: { attribute: false, state: true },
+    _days: { attribute: false, state: true },
+    _dialogOpen: { attribute: false, state: true },
+    _dialogEvent: { attribute: false, state: true },
+  };
+
   /** ---- Card plumping ---- */
   static get version() {
     return VERSION;
   }
 
   static styles = css`
-    :host { display: block }
-    ha-card { border-radius: 16px; overflow: hidden }
-    .hdr { display:flex; justify-content:space-between; align-items:center; gap:14px; margin:12px }
-    .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:14px }
-    .legend .item{ display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; padding:6px 10px; border-radius:999px }
-    .legend .dot{ width:14px; height:14px; border-radius:50%; display:inline-block }
-    .legend .inactive{ opacity:.4; filter: grayscale(.2) }
-    .badge{ border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,.06)); color:var(--primary-text-color,#111) }
-    .toolbar button{ all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06) }
-    .toolbar button:focus{ outline:2px solid var(--primary-color) }
-    .error{ color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px }
-    .empty{ color:var(--secondary-text-color); padding:8px 12px; font-size:12px }
-    .scroll{ height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0) }
-    .grid{ position:relative; display:grid; grid-template-columns:70px repeat(7,1fr); gap:1px; background:var(--divider-color,#e0e0e0) }
-    .col{ background:var(--card-background-color,#fff); position:relative }
-    .col.today{ outline:2px solid var(--primary-color); outline-offset:-2px }
-    .dayhdr{ position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px }
-    .today-pill{ border-radius:999px; background:#fff; color: var(--primary-color); font-size:10px; padding:2px 8px }
-    .allday{ padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0) }
-    .pill{ background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-    .timecol{ background:var(--card-background-color,#fff); position:relative }
-    .tick{ position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.1) }
-    .tick.minor{ border-top:1px dashed rgba(0,0,0,.08) }
-    .hour-label{ position:absolute; top:-8px; left:6px; font-size:12px; color:var(--secondary-text-color) }
-    .body{ position:relative }
-    .event{ position:absolute; border-radius:10px; padding:6px 8px; box-sizing:border-box; font-size:12px; line-height:1.15; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.12) }
-    .event .title{ font-weight:700 }
-    .now{ position:absolute; left:0; right:0; height:2px; background: var(--error-color,#e53935); z-index:3 }
-    .footer{ font-size:10px; color:var(--secondary-text-color); text-align:right; margin:4px 12px 10px }
+    :host{display:block}
+    ha-card{border-radius:16px; overflow:hidden}
+    .hdr{display:flex; justify-content:space-between; align-items:center; gap:14px; margin:12px}
+    .legend{display:flex; gap:12px; flex-wrap:wrap; font-size:14px}
+    .legend .item{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; padding:6px 10px; border-radius:999px}
+    .legend .dot{width:14px; height:14px; border-radius:50%; display:inline-block}
+    .legend .inactive{opacity:0.4; filter:grayscale(0.2)}
+    .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
+    .toolbar button{all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06)}
+    .toolbar button:focus{outline:2px solid var(--primary-color)}
+    .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
+    .empty{color:var(--secondary-text-color); padding:8px 12px; font-size:12px}
+    .scroll{height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
+    .grid{position:relative; display:grid; grid-template-columns:70px repeat(7,1fr); gap:1px; background:var(--divider-color,#e0e0e0)}
+    .col{background:var(--card-background-color,#fff); position:relative}
+    .col.today{outline:2px solid var(--primary-color); outline-offset:-2px}
+    .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
+    .today-pill{border-radius:999px; background:#fff; color: var(--primary-color); font-size:10px; padding:2px 8px}
+    .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
+    .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+    .timecol{background:var(--card-background-color,#fff); position:relative}
+    .tick{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.1)}
+    .tick.minor{border-top:1px dashed rgba(0,0,0,.08)}
+    .hour-label{position:absolute; top:-8px; left:6px; font-size:12px; color:var(--secondary-text-color)}
+    .body{position:relative}
+    .event{position:absolute; border-radius:10px; padding:6px 8px; box-sizing:border-box; font-size:12px; line-height:1.15; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.12)}
+    .event .title{font-weight:700}
+    .now{position:absolute; left:0; right:0; height:2px; background: var(--error-color,#e53935); z-index:3}
+    .footer{font-size:10px; color:var(--secondary-text-color); text-align:right; margin:4px 12px 10px}
 
     /* Weather band (native) */
     .mcg-wx[data-native]{ display:flex; align-items:center; gap:6px; font-size:12px }
@@ -388,6 +391,14 @@ export class MultiCalendarGridCard extends LitElement {
     .mcg-wx[data-native] .sep::before{ content:" / "; color: var(--secondary-text-color) }
     .mcg-wx[data-native] .pp{ color: var(--secondary-text-color); font-size:11px }
     .mcg-wx[data-native] ha-icon { --mdc-icon-size:20px }
+
+    /* Fallback overlay dialog */
+    .overlay{position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:10000}
+    .modal{background:var(--card-background-color,#fff); color:var(--primary-text-color,#111); border-radius:12px; min-width:280px; max-width:560px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.45)}
+    .modal h3{margin:0 0 10px 0; font-size:18px}
+    .modal .row{margin:8px 0; font-size:13px}
+    .modal .actions{display:flex; justify-content:flex-end; gap:8px; margin-top:10px}
+    .btn{all:unset; cursor:pointer; padding:6px 10px; border-radius:8px; background:rgba(0,0,0,.06)}
   `;
 
   /** Lovelace editor stub */
@@ -477,7 +488,7 @@ export class MultiCalendarGridCard extends LitElement {
   updated(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("_config") || changed.has("_weekAnchor")) {
       this._fetchEvents();
-      this._loadWeather(); // native weather
+      this._loadWeather();
       this.updateComplete.then(() => this._restoreScroll());
     }
   }
@@ -485,9 +496,7 @@ export class MultiCalendarGridCard extends LitElement {
   /** Timers */
   private _startTimers() {
     this._stopTimers();
-    // redraw the "now" line
     this._tick = window.setInterval(() => this.requestUpdate(), 60 * 1000);
-    // refresh data
     const mins = clamp(Number(this._config?.data_refresh_minutes) || 5, 1, 60);
     this._refresh = window.setInterval(() => {
       this._fetchEvents();
@@ -507,14 +516,12 @@ export class MultiCalendarGridCard extends LitElement {
     const today = startOfDay(new Date());
     let base: Date;
 
-    if (cfg.start_today !== false || cfg.first_day === "today" || cfg.first_day === -1) {
+    if (cfg.start_today !== false || cfg.first_day === "today" || (cfg as any).first_day === -1) {
       base = startOfDay(today);
     } else {
-      // Back-compat: fixed weekday start
       const first = typeof cfg.first_day === "number" ? cfg.first_day : 1; // default Monday
       base = startOfWeek(today, first);
     }
-    // Apply week offset in weeks (maintain behavior of prev/next buttons)
     base.setDate(base.getDate() + this._weekOffset * 7);
     this._weekAnchor = base;
   }
@@ -561,9 +568,7 @@ export class MultiCalendarGridCard extends LitElement {
       this.requestUpdate();
       return;
     }
-    // temperature unit
     this._wxUnit = this.hass.states?.[entity]?.attributes?.temperature_unit || "°";
-
     const days = clamp(this._config.weather_days ?? 7, 1, 10);
     const fetchId = ++this._lastFetchId;
     try {
@@ -617,8 +622,6 @@ export class MultiCalendarGridCard extends LitElement {
         }
       } catch (e) {
         failed.push(ent.name || ent.entity);
-        // Keep this console for local troubleshooting during dev builds.
-        // If you prefer no logs at all in CI, you can safely remove the next line.
         console.error("Calendar fetch failed:", ent.entity, e);
       }
     }
@@ -638,7 +641,6 @@ export class MultiCalendarGridCard extends LitElement {
 
       for (const raw of all) {
         const n = this._normalizeEvent(raw, raw.__id);
-        // include if overlaps this day
         if ((n.allDay ? new Date(n.e.getTime() - 1) : n.e) > dayStart && n.s < dayEnd) {
           if (n.allDay) {
             if (this._config.show_all_day) alls.push(n);
@@ -652,7 +654,6 @@ export class MultiCalendarGridCard extends LitElement {
         }
       }
 
-      // lane assignment (simple)
       timed.sort((a, b) => a.top - b.top || b.height - a.height);
       const laneEnd: number[] = [];
       for (const ev of timed) {
@@ -801,7 +802,6 @@ export class MultiCalendarGridCard extends LitElement {
       try {
         localStorage.setItem(activeMapKey, JSON.stringify(next));
       } catch {}
-      // force refetch & rerender with filter applied
       this._fetchEvents();
       this.requestUpdate();
     };
@@ -876,7 +876,6 @@ export class MultiCalendarGridCard extends LitElement {
           ? this._nowLineForDay(d)
           : nothing;
 
-      // Native weather band (single; avoids duplicates)
       const wx = this._renderWeatherBand(date);
 
       out.push(html`
@@ -891,7 +890,6 @@ export class MultiCalendarGridCard extends LitElement {
       `);
     }
 
-    // lock grid height to body height
     out.unshift(html`<style>.grid{height:${columnHeight}px}</style>`);
     return out;
   }
@@ -929,10 +927,12 @@ export class MultiCalendarGridCard extends LitElement {
   private _open(ev: CalEvent) {
     this._dialogEvent = ev;
     this._dialogOpen = true;
+    this.requestUpdate();
   }
   private _closeDialog() {
     this._dialogOpen = false;
     this._dialogEvent = undefined;
+    this.requestUpdate();
   }
 
   private _renderDialog() {
@@ -945,8 +945,7 @@ export class MultiCalendarGridCard extends LitElement {
       ${ev.description ? html`<div class="row">${ev.description}</div>` : nothing}
     `;
 
-    // Prefer HA dialog if present
-    if (customElements.get("ha-dialog")) {
+    if ((customElements as any).get("ha-dialog")) {
       return html`<ha-dialog .open=${this._dialogOpen} @closed=${() => this._closeDialog()}>
         <div slot="heading">${tr(this._lang(), "event_details")}</div>
         ${body}
@@ -954,7 +953,6 @@ export class MultiCalendarGridCard extends LitElement {
       </ha-dialog>`;
     }
 
-    // Simple fallback overlay
     return html`<div class="overlay" @click=${(e: Event) => (e.target === e.currentTarget ? this._closeDialog() : null)}>
       <div class="modal" role="dialog" aria-modal="true" aria-label="${tr(this._lang(), "event_details")}">
         <h3>${tr(this._lang(), "event_details")}</h3>
@@ -974,19 +972,13 @@ export class MultiCalendarGridCard extends LitElement {
 
 /** Helpers */
 function hash(s: string): string {
-  // djb2
   let t = 5381;
   for (let i = 0; i < s.length; i++) t = (t * 33) ^ s.charCodeAt(i);
   return (t >>> 0).toString(36);
 }
 
-// Register card metadata for HACS preview
-declare global {
-  interface HTMLElementTagNameMap {
-    [CARD_TAG]: MultiCalendarGridCard;
-  }
-}
-if (!customElements.get(CARD_TAG)) customElements.define(CARD_TAG, MultiCalendarGridCard);
+/** Define element (no decorator) and card registration */
+if (!customElements.get(CARD_TAG)) customElements.define(CARD_TAG, MultiCalendarGridCard as any);
 (window as any).customCards = (window as any).customCards || [];
 if (!(window as any).customCards.find((c: any) => c.type === CARD_TAG)) {
   (window as any).customCards.push({
