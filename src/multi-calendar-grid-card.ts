@@ -1,793 +1,637 @@
 /**
- * Multi-Calendar Grid Card — Lit + TypeScript (no decorators) v0.7.0
- * - All-day end = exclusive; date-only formatting for all-day
- * - Legend persistence (localStorage), namespaced per-card
- * - slot_minutes drives grid ticks
- * - ha-dialog details (fallback overlay)
- * - Abort stale fetches; per-entity error messages
- * - getStubConfig for card picker; i18n helper; ARIA
- * - Version injected at build (__VERSION__), default "dev"
+ * Multi Calendar Grid Card (baseline with inline weather)
+ * Version: 1.0.0-weather-inline
+ *
+ * Notes:
+ * - Self-contained; no external helpers.
+ * - Weather pill uses the same WS logic that worked in the sandbox:
+ *     weather.get_forecasts (daily → hourly aggregate → attributes fallback).
+ * - You can add your existing event rendering back where indicated.
  */
 
-import { LitElement, html, css, nothing, PropertyValues } from "lit";
+import { LitElement, html, css, nothing, CSSResultGroup } from "lit";
+import { property, state } from "lit/decorators.js";
 
-// Build-time injected by CI; fallback to "dev" locally
-declare const __VERSION__: string | undefined;
-const VERSION = typeof __VERSION__ !== "undefined" && __VERSION__ ? __VERSION__ : "dev";
+/* ============================================================================
+   BEGIN: Inline Weather Helpers (no external files)
+   ========================================================================== */
 
-// ---------- Types ----------
-export interface McgEntityConfig {
-  entity: string;
-  name?: string;
-  color?: string;
-}
-export interface McgConfig {
-  type?: string;
-  entities: McgEntityConfig[];
-  first_day?: number; // 0=Sun..6=Sat (default 1 Mon)
-  slot_min_time?: string; // "HH:MM:SS"
-  slot_max_time?: string; // "HH:MM:SS" (informational)
-  slot_minutes?: number; // grid minor tick step
-  locale?: string;
-  show_now_indicator?: boolean;
-  show_all_day?: boolean;
-  height_vh?: number; // viewport height
-  remember_offset?: boolean;
-  storage_key?: string; // legacy; now we namespace automatically
-  header_compact?: boolean;
-  data_refresh_minutes?: number;
-  px_per_min?: number; // vertical scale
-}
+type WcForecastItem = {
+  datetime?: string;            // ISO
+  date?: string;                // alt
+  time?: string;                // alt
+  dt?: string | number;         // alt
+  timestamp?: string | number;  // alt
 
-interface HassEntityEventRaw {
-  start: any;
-  end: any;
-  summary?: string;
-  location?: string;
-  description?: string;
-  [k: string]: any;
-}
-interface NormalizedEvent {
-  s: Date;
-  e: Date;
-  allDay: boolean;
-  summary: string;
-  location?: string;
-  description?: string;
-  color: string;
-  src: string;
-  raw: HassEntityEventRaw;
-}
-interface TimedLayout {
-  n: NormalizedEvent;
-  top: number; // minutes from 00:00
-  height: number; // minutes
-  lane: number;
-}
-interface DayBucket {
-  date: Date;
-  allDay: NormalizedEvent[];
-  timed: TimedLayout[];
-  laneCount: number;
-}
+  condition?: string;
+  condition_description?: string;
+  state?: string;
+  symbol?: string;
 
-// Minimal HA surface we use
-export interface HomeAssistantLike {
-  callApi(method: string, path: string): Promise<any>;
-  locale?: { language?: string; time_format?: "12" | "24" };
-  states?: Record<string, any>;
-}
+  temperature?: number;
+  temperature_high?: number;
+  temp?: number;
+  templow?: number;
+  temperature_low?: number;
 
-// ---------- Constants ----------
-const TAG = "multi-calendar-grid-card";
-const STORAGE_PREFIX = TAG;
+  precipitation_probability?: number;
+  precipitation_chance?: number;
+  precipitation?: number;       // amount (mm)
+  precipitation_unit?: string;
 
-const DEFAULTS: Required<Omit<McgConfig, "entities" | "type">> = {
-  first_day: 1,
-  slot_min_time: "07:00:00",
-  slot_max_time: "22:00:00",
-  slot_minutes: 30,
-  locale: "en",
-  show_now_indicator: true,
-  show_all_day: true,
-  height_vh: 80,
-  remember_offset: true,
-  storage_key: `${STORAGE_PREFIX}.weekOffset`, // legacy key; no longer used directly
-  header_compact: false,
-  data_refresh_minutes: 5,
-  px_per_min: 1.6,
+  wind_speed?: number;
+  wind_speed_kmh?: number;
+  wind_speed_mps?: number;
 };
 
-// ---------- i18n ----------
-const STRINGS: Record<string, Record<string, string>> = {
-  en: {
-    prev: "Prev",
-    next: "Next",
-    today: "Today",
-    today_pill: "Today",
-    no_events: "No events in this range.",
-    event_details: "Event details",
-    close: "Close",
-    aria_prev_week: "Previous week",
-    aria_next_week: "Next week",
-    aria_today: "Go to current week",
-    failed_load_prefix: "Failed to load:",
-  },
-};
-function t(lang: string | undefined, key: string): string {
-  const l = (lang || "en").split("-")[0];
-  return (STRINGS[l] && STRINGS[l][key]) || STRINGS.en[key] || key;
-}
-
-// ---------- Utils ----------
-const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
-const parseHHMMSS = (s?: string) => /^\d{2}:\d{2}:\d{2}$/.test(String(s || ""));
-const minsFrom = (s: string) => {
-  const [H, M, S] = s.split(":").map(Number);
-  return H * 60 + M + (S || 0) / 60;
-};
-const weekStartOf = (d: Date, first: number) => {
-  const x = new Date(d);
-  const off = (x.getDay() + 7 - (first % 7)) % 7;
-  x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - off);
-  return x;
-};
-const addMin = (dt: Date, m: number) => {
-  const d = new Date(dt);
-  d.setMinutes(d.getMinutes() + m);
-  return d;
+type WcDaily = {
+  key: string;          // YYYY-MM-DD
+  datetime: string;     // noon ISO for stable formatting
+  condition: string;
+  temperature: number | null;   // high
+  templow: number | null;       // low
+  precipitation_probability?: number | null;
+  precipitation?: number | null; // amount if available
+  wind_speed?: number | null;
 };
 
-// Colors
-const SAFE_HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
-const SAFE_RGB = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|0?\.\d+|1(?:\.0)?))?\s*\)$/;
-const SAFE_VAR = /^var\(--[a-zA-Z0-9_-]+\)$/;
+const WC_INLINE_VERSION = "inline-weather 0.3.2";
 
-const hexToRgb = (hex: string) => {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!m) return { r: 51, g: 102, b: 204 };
-  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
-};
-const textOn = (hex: string) => {
-  const { r, g, b } = hexToRgb(hex);
-  const L = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return L > 0.6 ? "#111" : "#fff";
-};
-const softBg = (hex: string, a = 0.55) => {
-  const { r, g, b } = hexToRgb(hex);
-  return `rgba(${r},${g},${b},${a})`;
-};
-const safeColor = (c?: string): { raw: string; hex: string | null } => {
-  const s = String(c || "").trim();
-  if (SAFE_HEX.test(s)) return { raw: s, hex: s };
-  if (SAFE_RGB.test(s) || SAFE_VAR.test(s)) return { raw: s, hex: null };
-  return { raw: "#3366cc", hex: "#3366cc" };
+const wc_num = (v: any): number | null => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 };
 
-// Storage namespace (per-card)
-function djb2base36(s: string): string {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = (h * 33) ^ s.charCodeAt(i);
-  return (h >>> 0).toString(36);
-}
+const wc_dayKey = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
 
-// ---------- Card ----------
-export class MultiCalendarGridCard extends LitElement {
-  static version = VERSION;
-
-  static properties = {
-    hass: { attribute: false },
-    _config: { attribute: false, state: true },
-    _weekOffset: { state: true },
-    _error: { state: true },
-    _weekStart: { state: true },
-    _days: { state: true },
-    _dialogOpen: { state: true },
-    _dialogEvent: { attribute: false, state: true },
+const wc_icon = (condRaw: string | undefined) => {
+  const cond = (condRaw || "-").toLowerCase().replace(/\s+/g, "");
+  const map: Record<string, string> = {
+    "clear-night": "mdi:weather-night",
+    "cloudy": "mdi:weather-cloudy",
+    "fog": "mdi:weather-fog",
+    "hail": "mdi:weather-hail",
+    "lightning": "mdi:weather-lightning",
+    "lightning-rainy": "mdi:weather-lightning-rainy",
+    "partlycloudy": "mdi:weather-partly-cloudy",
+    "pouring": "mdi:weather-pouring",
+    "rainy": "mdi:weather-rainy",
+    "snowy": "mdi:weather-snowy",
+    "snowy-rainy": "mdi:weather-snowy-rainy",
+    "sunny": "mdi:weather-sunny",
+    "windy": "mdi:weather-windy",
+    "windy-variant": "mdi:weather-windy-variant",
+    "exceptional": "mdi:weather-alert",
   };
+  const norm = cond
+    .replace("overcast", "cloudy")
+    .replace("partlysunny", "partlycloudy")
+    .replace("mostlycloudy", "partlycloudy")
+    .replace("drizzle", "rainy");
+  return map[norm] || map[cond] || "mdi:weather-cloudy";
+};
 
-  // For HA card picker
-  static async getStubConfig(hass: any) {
-    const states: Record<string, any> = hass?.states || {};
-    const calendars = Object.keys(states).filter((k) => k.startsWith("calendar."));
-    const pick = calendars.slice(0, 2);
-    const palette = ["#3f51b5", "#9c27b0", "#03a9f4", "#009688", "#ff9800", "#e91e63"];
-    const entities: McgEntityConfig[] =
-      pick.length > 0
-        ? pick.map((id, i) => ({ entity: id, name: states[id]?.attributes?.friendly_name || id, color: palette[i % palette.length] }))
-        : [{ entity: "calendar.calendar", name: "Calendar", color: palette[0] }];
-    return {
-      type: TAG,
-      entities,
-      first_day: 1,
-      slot_min_time: "07:00:00",
-      slot_max_time: "22:00:00",
-      slot_minutes: 30,
-      locale: "en",
-      show_now_indicator: true,
-      show_all_day: true,
-      remember_offset: true,
-      header_compact: false,
-      height_vh: 80,
-      data_refresh_minutes: 5,
-      px_per_min: 1.6,
-    } as McgConfig;
+const wc_mode = (arr: string[]) => {
+  if (!arr.length) return null;
+  const m = new Map<string, number>();
+  for (const v of arr) m.set(v, (m.get(v) || 0) + 1);
+  return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
+};
+
+const wc_fmtTemp = (v: number | null | undefined, unit: string) =>
+  v == null ? null : `${Math.round(v)}${unit || "°"}`;
+
+const wc_aggregateHourlyToDaily = (hourly: WcForecastItem[], daysWanted: number): WcDaily[] => {
+  const byDay = new Map<string, WcForecastItem[]>();
+  const todayKey = wc_dayKey(new Date());
+
+  for (const h of hourly) {
+    const base =
+      h.datetime ??
+      h.date ??
+      h.time ??
+      (typeof h.dt === "number" ? h.dt : h.dt) ??
+      h.timestamp ??
+      Date.now();
+    const when = new Date(base as any);
+    const key = wc_dayKey(when);
+    if (key < todayKey) continue;
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key)!.push(h);
   }
 
-  public hass!: HomeAssistantLike;
+  const days: WcDaily[] = [];
+  for (const [key, list] of [...byDay.entries()].sort()) {
+    let tMax = -Infinity, tMin = +Infinity;
+    let precipProb = null as number | null;
+    let precipAmt = null as number | null;
+    let wind = null as number | null;
 
-  // Internal state
-  private _config!: McgConfig;
-  private _weekOffset = 0;
-  private _error: string | null = null;
-  private _weekStart!: Date;
-  private _days: DayBucket[] = [];
-  private _dialogOpen = false;
-  private _dialogEvent?: NormalizedEvent;
+    for (const it of list) {
+      const t = wc_num(it.temperature ?? it.temp);
+      if (t != null) {
+        if (t > tMax) tMax = t;
+        if (t < tMin) tMin = t;
+      }
+      const pp = wc_num(it.precipitation_probability ?? it.precipitation_chance);
+      if (pp != null) precipProb = precipProb == null ? pp : Math.max(precipProb, pp);
 
-  private _tick?: number;
-  private _refresh?: number;
-  private _active: Record<string, boolean> = {};
-  private _scrollEl?: HTMLElement;
-  private _lastFetchId = 0;
+      const pa = wc_num(it.precipitation);
+      if (pa != null) precipAmt = (precipAmt ?? 0) + pa;
 
-  // Storage keys
-  private _nsBase = ""; // computed per-config
-
-  static getConfigElement() {
-    const div = document.createElement("div");
-    div.innerHTML = `<div style="padding:8px">Use YAML to configure this card. Editor coming later. (v${VERSION})</div>`;
-    return div;
-  }
-
-  public setConfig(config: McgConfig) {
-    if (!config || !Array.isArray(config.entities) || config.entities.length === 0) {
-      throw new Error("Config must include at least one entity in 'entities'.");
+      const ws = wc_num(it.wind_speed ?? it.wind_speed_kmh ?? it.wind_speed_mps);
+      if (ws != null) wind = wind == null ? ws : Math.max(wind, ws);
     }
-    if (!parseHHMMSS(config.slot_min_time)) throw new Error("slot_min_time must be HH:MM:SS");
-    if (!parseHHMMSS(config.slot_max_time)) throw new Error("slot_max_time must be HH:MM:SS");
+    if (!Number.isFinite(tMax)) tMax = null as any;
+    if (!Number.isFinite(tMin)) tMin = null as any;
 
-    // Validate slot_minutes
-    const step = Number(config.slot_minutes ?? DEFAULTS.slot_minutes);
-    if (!Number.isFinite(step) || step <= 0 || step > 180) {
-      throw new Error("slot_minutes must be a number between 1 and 180.");
-    }
+    const cond = wc_mode(
+      list
+        .map((it) => it.condition ?? it.condition_description ?? it.symbol ?? it.state)
+        .filter(Boolean) as string[]
+    ) ?? "-";
 
-    this._config = { ...DEFAULTS, ...config } as McgConfig;
-
-    // Namespace storage per card instance
-    const idStr = JSON.stringify({
-      entities: this._config.entities.map((e) => e.entity).sort(),
-      first_day: this._config.first_day,
+    days.push({
+      key,
+      datetime: `${key}T12:00:00`,
+      condition: cond,
+      temperature: tMax as any,
+      templow: tMin as any,
+      precipitation_probability: precipProb,
+      precipitation: precipAmt,
+      wind_speed: wind,
     });
-    const hash = djb2base36(idStr);
-    this._nsBase = `${STORAGE_PREFIX}.${hash}`;
 
-    // Legend persistence
-    this._active = {};
-    const savedLegend = this._loadLS(`${this._nsBase}.legend`);
-    if (savedLegend) {
-      try {
-        const parsed = JSON.parse(savedLegend);
-        for (const ent of this._config.entities) this._active[ent.entity] = parsed[ent.entity] !== false;
-      } catch {
-        for (const ent of this._config.entities) this._active[ent.entity] = true;
-      }
-    } else {
-      for (const ent of this._config.entities) this._active[ent.entity] = true;
-    }
-
-    // Week offset persistence
-    try {
-      if (this._config.remember_offset) {
-        const v = Number(this._loadLS(`${this._nsBase}.weekOffset`));
-        this._weekOffset = Number.isFinite(v) ? v : 0;
-      } else {
-        this._weekOffset = 0;
-      }
-    } catch {
-      this._weekOffset = 0;
-    }
-
-    this._recomputeWeekBounds();
+    if (days.length >= daysWanted) break;
   }
+  return days;
+};
 
-  getCardSize() {
-    const vh = Number(this._config?.height_vh || 80);
-    const approx = Math.max(300, vh * 7);
-    return Math.ceil(approx / 50);
-  }
+const wc_fetchViaService = async (hass: any, entityId: string, type: "daily" | "hourly"): Promise<WcForecastItem[]> => {
+  const resp = await hass.callWS({
+    type: "call_service",
+    domain: "weather",
+    service: "get_forecasts",
+    service_data: { entity_id: entityId, type },
+    return_response: true,
+  });
+  const payload = resp?.response ?? resp ?? {};
+  const data = payload[entityId] ?? payload;
+  const list = data?.forecast ?? [];
+  return Array.isArray(list) ? (list as WcForecastItem[]) : [];
+};
 
-  connectedCallback(): void {
-    super.connectedCallback();
-    this._startTimers();
-  }
-  disconnectedCallback(): void {
-    super.disconnectedCallback();
-    this._stopTimers();
-  }
+class WeatherInlineCache {
+  private _hass: any | null = null;
+  private _entity = "";
+  private _days = 7;
+  private _lastChanged?: string;
+  private _unit = "°";
+  private _byKey = new Map<string, WcDaily>();
 
-  protected firstUpdated(): void {
-    this._scrollEl = (this.shadowRoot || this.renderRoot).querySelector<HTMLElement>(".scroll") || undefined;
-    this._restoreScroll();
-  }
-
-  protected updated(changed: PropertyValues) {
-    if (changed.has("_config")) {
-      this._recomputeWeekBounds();
-      this._fetchEvents();
-      (this as any).updateComplete.then(() => this._restoreScroll());
-    }
-  }
-
-  // ---------- Data ----------
-  private async _fetchEvents() {
-    if (!this.hass) return;
-    const fetchId = ++this._lastFetchId;
-    this._error = null;
-
-    const start = this._weekStart;
-    const end = addMin(start, 7 * 24 * 60);
-    const startISO = start.toISOString();
-    const endISO = end.toISOString();
-
-    const errors: string[] = [];
-    const collected: HassEntityEventRaw[] = [];
-
-    // Fetch sequentially (keeps logs ordered); could parallelize if needed
-    for (const ent of this._config.entities) {
-      const path = `calendars/${ent.entity}?start=${encodeURIComponent(startISO)}&end=${encodeURIComponent(endISO)}`;
-      try {
-        const evs = await this.hass.callApi("GET", path);
-        if (fetchId !== this._lastFetchId) return; // stale
-        if (Array.isArray(evs)) {
-          for (const e of evs) {
-            (e as any).__color = ent.color;
-            (e as any).__id = ent.entity;
-            (e as any).__name = ent.name || ent.entity;
-            collected.push(e);
-          }
-        }
-      } catch (e: any) {
-        // Human-friendly per-entity error
-        errors.push(`${ent.name || ent.entity}`);
-        console.error("Calendar fetch failed:", ent.entity, e);
-      }
-    }
-
-    // Build days
-    const days: DayBucket[] = [];
-    for (let i = 0; i < 7; i++) {
-      const d0 = addMin(start, i * 24 * 60);
-      const d1 = addMin(d0, 24 * 60);
-
-      const allDay: NormalizedEvent[] = [];
-      const timed: TimedLayout[] = [];
-
-      for (const ev of collected) {
-        const srcId = (ev as any).__id as string;
-        if (!this._active[srcId]) continue;
-
-        const n = this._norm(ev as any, srcId);
-
-        // All-day: treat end as exclusive for overlap checks
-        const eAdj = n.allDay ? new Date(n.e.getTime() - 1) : n.e;
-        if (!(eAdj > d0 && n.s < d1)) continue;
-
-        if (n.allDay) {
-          if (this._config.show_all_day) allDay.push(n);
-        } else {
-          const startM = Math.max(0, (n.s.getTime() - d0.getTime()) / 60000);
-          const endM = Math.max(0, (n.e.getTime() - d0.getTime()) / 60000);
-          const top = Math.max(0, startM);
-          const height = Math.max(1, Math.min(1440, Math.max(top + 1, endM)) - top);
-          timed.push({ n, top, height, lane: 0 });
-        }
-      }
-
-      // lane layout
-      timed.sort((a, b) => a.top - b.top || b.height - a.height);
-      const lanes: number[] = [];
-      for (const ev of timed) {
-        let placed = false;
-        for (let li = 0; li < lanes.length; li++) {
-          if (ev.top >= lanes[li]) {
-            lanes[li] = ev.top + ev.height;
-            ev.lane = li;
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) {
-          ev.lane = lanes.length;
-          lanes.push(ev.top + ev.height);
-        }
-      }
-
-      days.push({ date: d0, allDay, timed, laneCount: Math.max(1, lanes.length) });
-    }
-
-    if (fetchId !== this._lastFetchId) return; // stale
-
+  constructor(entity: string, days = 7) {
+    this._entity = entity;
     this._days = days;
-    this._error = errors.length ? `${t(this._lang(), "failed_load_prefix")} ${errors.join(", ")}` : null;
   }
 
-  private _norm(ev: HassEntityEventRaw, src: string): NormalizedEvent {
-    const sRaw: any = (ev as any).start?.dateTime || (ev as any).start?.date || (ev as any).start;
-    const eRaw: any = (ev as any).end?.dateTime || (ev as any).end?.date || (ev as any).end;
-    const hasTime =
-      Boolean((ev as any).start?.dateTime || (ev as any).end?.dateTime) ||
-      (typeof sRaw === "string" && sRaw.includes("T")) ||
-      (typeof eRaw === "string" && eRaw.includes("T"));
-    const s = new Date(sRaw);
-    const e = new Date(eRaw);
-    const allDay = !hasTime;
-    return {
-      s,
-      e,
-      allDay,
-      summary: (ev as any).summary || "(no title)",
-      location: (ev as any).location,
-      description: (ev as any).description,
-      color: (ev as any).__color || "#3366cc",
-      src,
-      raw: ev,
-    };
+  setHass(hass: any) {
+    this._hass = hass;
+    const st = hass?.states?.[this._entity];
+    if (st) this._unit = st.attributes?.temperature_unit ?? "°";
   }
 
-  // ---------- Timers ----------
-  private _startTimers() {
-    this._stopTimers();
-    this._tick = window.setInterval(() => (this as any).requestUpdate(), 60 * 1000);
-    const mins = clamp(Number(this._config?.data_refresh_minutes) || 5, 1, 60);
-    this._refresh = window.setInterval(() => this._fetchEvents(), mins * 60 * 1000);
-  }
-  private _stopTimers() {
-    if (this._tick) window.clearInterval(this._tick);
-    if (this._refresh) window.clearInterval(this._refresh);
-    this._tick = undefined;
-    this._refresh = undefined;
+  get unit() { return this._unit; }
+
+  get(key: string): WcDaily | undefined {
+    return this._byKey.get(key);
   }
 
-  // ---------- UI helpers ----------
-  private _recomputeWeekBounds() {
-    const base = weekStartOf(new Date(), this._config?.first_day ?? 1);
-    const s = new Date(base);
-    s.setDate(s.getDate() + this._weekOffset * 7);
-    this._weekStart = s;
+  keys(): string[] {
+    return [...this._byKey.keys()];
   }
 
-  private _saveOffset() {
-    if (!this._config.remember_offset) return;
-    this._saveLS(`${this._nsBase}.weekOffset`, String(this._weekOffset));
-  }
+  async refreshIfNeeded(): Promise<void> {
+    if (!this._hass) return;
+    const st = this._hass.states?.[this._entity];
+    if (!st) return;
 
-  private _restoreScroll() {
-    const minPrefMin = minsFrom(this._config.slot_min_time!);
-    const ppm = Number(this._config.px_per_min) || 1.6;
-    const headerOffset = 24;
-    const minPrefPx = Math.max(0, Math.round(minPrefMin * ppm) - headerOffset);
+    if (this._lastChanged === st.last_changed && this._byKey.size) return;
+    this._lastChanged = st.last_changed;
 
-    let target = minPrefPx;
-    if (this._config.remember_offset) {
-      const saved = Number(this._loadLS(`${this._nsBase}.scrollTop`));
-      if (Number.isFinite(saved)) target = Math.max(minPrefPx, saved);
+    // 1) WS daily
+    let items = await wc_fetchViaService(this._hass, this._entity, "daily");
+
+    // 2) WS hourly → aggregate
+    if (!items?.length) {
+      const hourly = await wc_fetchViaService(this._hass, this._entity, "hourly");
+      if (hourly?.length) items = wc_aggregateHourlyToDaily(hourly, this._days) as any;
     }
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        const sc = (this.shadowRoot || this.renderRoot).querySelector<HTMLElement>(".scroll");
-        if (sc) sc.scrollTop = target;
-      })
-    );
-  }
 
-  private _persistScroll() {
-    if (!this._config.remember_offset) return;
-    const sc = (this.shadowRoot || this.renderRoot).querySelector<HTMLElement>(".scroll");
-    if (sc) this._saveLS(`${this._nsBase}.scrollTop`, String(sc.scrollTop));
-  }
-
-  private _shiftWeek(delta = 0, toToday = false) {
-    if (toToday) this._weekOffset = 0;
-    else this._weekOffset += delta;
-    this._saveOffset();
-    this._recomputeWeekBounds();
-    this._fetchEvents();
-    (this as any).updateComplete.then(() => this._restoreScroll());
-  }
-
-  private _fmtRange(s: Date, e: Date, allDay: boolean) {
-    const hassLocale = (this as any)?.hass?.locale;
-    const locale = this._config.locale || hassLocale?.language || "en";
-    if (allDay) {
-      const dFmt = new Intl.DateTimeFormat(locale, { weekday: "short", day: "2-digit", month: "short" });
-      const same = s.toDateString() === e.toDateString();
-      // e for all-day is exclusive in raw; we display inclusive end day
-      const eInc = new Date(e.getFullYear(), e.getMonth(), e.getDate());
-      eInc.setMilliseconds(-1);
-      return same ? `${dFmt.format(s)}` : `${dFmt.format(s)} → ${dFmt.format(new Date(eInc))}`;
+    // 3) attributes.forecast last resort
+    if (!items?.length) {
+      const attrList = st.attributes?.forecast;
+      if (Array.isArray(attrList) && attrList.length) {
+        items = attrList;
+      }
     }
-    const hourCycle: any = hassLocale?.time_format === "12" ? "h12" : "h23";
-    const tFmt = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", hourCycle });
-    const dFmt = new Intl.DateTimeFormat(locale, { weekday: "short", day: "2-digit", month: "short" });
-    const same = s.toDateString() === e.toDateString();
-    return same ? `${dFmt.format(s)} • ${tFmt.format(s)}–${tFmt.format(e)}` : `${dFmt.format(s)} ${tFmt.format(s)} → ${dFmt.format(e)} ${tFmt.format(e)}`;
+
+    // Normalize to WcDaily
+    const normalized: WcDaily[] = (items as any[]).map((f) => {
+      const dt = new Date(f.datetime || f.date || f.time || f.dt || f.timestamp || Date.now());
+      const key = wc_dayKey(dt);
+      return {
+        key,
+        datetime: `${key}T12:00:00`,
+        condition: (f.condition ?? f.condition_description ?? f.symbol ?? f.state ?? "-").toString(),
+        temperature: wc_num(f.temperature ?? f.temperature_high ?? f.temp),
+        templow: wc_num(f.templow ?? f.temperature_low),
+        precipitation_probability: wc_num(f.precipitation_probability ?? f.precipitation_chance),
+        precipitation: wc_num(f.precipitation),
+        wind_speed: wc_num(f.wind_speed ?? f.wind_speed_kmh ?? f.wind_speed_mps),
+      };
+    });
+
+    this._byKey.clear();
+    for (const d of normalized) if (!this._byKey.has(d.key)) this._byKey.set(d.key, d);
+    const keys = [...this._byKey.keys()].sort().slice(0, this._days);
+    const pruned = new Map<string, WcDaily>();
+    for (const k of keys) pruned.set(k, this._byKey.get(k)!);
+    this._byKey = pruned;
   }
 
-  private _lang() {
-    const hassLocale = (this as any)?.hass?.locale;
-    return this._config.locale || hassLocale?.language || "en";
-  }
+  renderHeaderPill(d: Date) {
+    const day = this.get(wc_dayKey(d));
+    if (!day) return nothing;
 
-  private _saveLegend() {
-    try {
-      this._saveLS(`${this._nsBase}.legend`, JSON.stringify(this._active));
-    } catch {}
-  }
-
-  private _saveLS(key: string, val: string) {
-    try {
-      localStorage.setItem(key, val);
-    } catch {}
-  }
-  private _loadLS(key: string): string | null {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  }
-
-  // ---------- Dialog ----------
-  private _openDetails(n: NormalizedEvent) {
-    this._dialogEvent = n;
-    this._dialogOpen = true;
-  }
-  private _closeDialog() {
-    this._dialogOpen = false;
-    this._dialogEvent = undefined;
-  }
-
-  // ---------- Styles ----------
-  static styles = css`
-    :host{display:block}
-    ha-card{border-radius:16px; overflow:hidden}
-    .hdr{display:flex; justify-content:space-between; align-items:center; gap:14px; margin:12px}
-    .legend{display:flex; gap:12px; flex-wrap:wrap; font-size:14px}
-    .legend .item{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; padding:6px 10px; border-radius:999px}
-    .legend .dot{width:14px; height:14px; border-radius:50%; display:inline-block}
-    .legend .inactive{opacity:0.4; filter:grayscale(0.2)}
-    .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
-    .toolbar button{all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06)}
-    .toolbar button:focus{outline:2px solid var(--primary-color)}
-    .toolbar button[type="button"]{line-height:1}
-    .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
-    .empty{color:var(--secondary-text-color); padding:8px 12px; font-size:12px}
-    .scroll{height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
-    .grid{position:relative; display:grid; grid-template-columns:70px repeat(7,1fr); gap:1px; background:var(--divider-color,#e0e0e0)}
-    .col{background:var(--card-background-color,#fff); position:relative}
-    .col.today{outline:2px solid var(--primary-color); outline-offset:-2px}
-    .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; gap:8px}
-    .today-pill{border-radius:999px; background:#fff; color: var(--primary-color); font-size:10px; padding:2px 8px}
-    .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
-    .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-    .timecol{background:var(--card-background-color,#fff); position:relative}
-    .tick{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.1)}
-    .tick.minor{border-top:1px dashed rgba(0,0,0,.08)}
-    .hour-label{position:absolute; top:-8px; left:6px; font-size:12px; color:var(--secondary-text-color)}
-    .body{position:relative}
-    .event{position:absolute; border-radius:10px; padding:6px 8px; box-sizing:border-box; font-size:12px; line-height:1.15; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.12)}
-    .event .title{font-weight:700}
-    .now{position:absolute; left:0; right:0; height:2px; background: var(--error-color,#e53935); z-index:3}
-    .footer{font-size:10px; color:var(--secondary-text-color); text-align:right; margin:4px 12px 10px}
-
-    /* Fallback overlay dialog */
-    .overlay{position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:10000}
-    .modal{background:var(--card-background-color,#fff); color:var(--primary-text-color,#111); border-radius:12px; min-width:280px; max-width:560px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.45)}
-    .modal h3{margin:0 0 10px 0; font-size:18px}
-    .modal .row{margin:8px 0; font-size:13px}
-    .modal .actions{display:flex; justify-content:flex-end; gap:8px; margin-top:10px}
-    .btn{all:unset; cursor:pointer; padding:6px 10px; border-radius:8px; background:rgba(0,0,0,.06)}
-  `;
-
-  // ---------- Render ----------
-  render() {
-    const ws = this._weekStart;
-    const we = addMin(new Date(ws), 7 * 24 * 60 - 1);
-    const lang = this._lang();
-    const fmt = new Intl.DateTimeFormat(lang, { day: "2-digit", month: "short" });
-    const vh = Number(this._config.height_vh || 80);
+    const icon = wc_icon(day.condition);
+    const hi = wc_fmtTemp(day.temperature, this._unit) ?? "–";
+    const lo = day.templow != null ? wc_fmtTemp(day.templow, this._unit) : null;
+    const rr = day.precipitation_probability;
+    const ra = day.precipitation;
 
     return html`
-      <ha-card>
-        <div class="hdr">
-          <div class="legend">
-            ${this._config.entities.map((ent) => this._legendItem(ent))}
-          </div>
-          <div class="badge" title="${this._error ? this._error : ""}">
-            ${fmt.format(ws)} – ${fmt.format(we)}
-          </div>
-          <div class="toolbar">
-            <button type="button" aria-label="${t(lang, "aria_prev_week")}" @click=${() => this._shiftWeek(-1)}>${t(lang, "prev")}</button>
-            <button type="button" aria-label="${t(lang, "aria_today")}" @click=${() => this._shiftWeek(0, true)}>${t(lang, "today")}</button>
-            <button type="button" aria-label="${t(lang, "aria_next_week")}" @click=${() => this._shiftWeek(1)}>${t(lang, "next")}</button>
-          </div>
-        </div>
-
-        ${this._error ? html`<div class="error">${this._error}</div>` : nothing}
-        ${this._anyEvents() ? nothing : html`<div class="empty">${t(lang, "no_events")}</div>`}
-
-        <div class="scroll" style=${`--mcg-height:${vh}vh`} @scroll=${this._persistScroll}>
-          <div class="grid">
-            ${this._timeColumn()}
-            ${this._dayColumns(ws)}
-          </div>
-        </div>
-
-        <div class="footer">Multi-Calendar Grid Card v${VERSION}</div>
-
-        ${this._renderDialog()}
-      </ha-card>
-    `;
-  }
-
-  private _legendItem(ent: McgEntityConfig) {
-    const active = !!this._active[ent.entity];
-    const cls = active ? "item" : "item inactive";
-    return html`<div
-      class=${cls}
-      @click=${() => {
-        this._active[ent.entity] = !active;
-        this._saveLegend();
-        this._fetchEvents();
-      }}
-    >
-      <span class="dot" style=${`background:${safeColor(ent.color).raw}`}></span>
-      <span>${ent.name || ent.entity}</span>
-    </div>`;
-  }
-
-  private _timeColumn() {
-    const elems: unknown[] = [];
-    const ppm = Number(this._config.px_per_min) || 1.6;
-    const step = Number(this._config.slot_minutes) || 30;
-    for (let m = 0; m <= 1440; m += step) {
-      const y = Math.round(m * ppm);
-      elems.push(html`<div class=${m % 60 === 0 ? "tick" : "tick minor"} style=${`top:${y}px`}></div>`);
-      if (m % 60 === 0) elems.push(html`<div class="hour-label" style=${`top:${y - 8}px`}>${String(Math.floor(m / 60)).padStart(2, "0")}:00</div>`);
-    }
-    return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative">${elems}</div>`;
-  }
-
-  private _dayColumns(ws: Date) {
-    const cols: unknown[] = [];
-    const ppm = Number(this._config.px_per_min) || 1.6;
-    const contentPx = Math.round(1440 * ppm);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(ws);
-      d.setDate(d.getDate() + i);
-      const isToday = d.getTime() === today.getTime();
-      const labelTxt = d.toLocaleDateString(this._lang(), { weekday: "short", day: "2-digit", month: "short" });
-
-      const day = this._days[i];
-      const allday = this._config.show_all_day
-        ? html`<div class="allday">
-            ${(day?.allDay || []).map((n) => html`<div class="pill" @click=${() => this._openDetails(n)}>${n.summary}</div>`)}
-          </div>`
-        : nothing;
-
-      const laneCount = day?.laneCount || 1;
-      const timedBlocks =
-        (day?.timed || []).length === 0
-          ? nothing
-          : (day?.timed || []).map((ev) => {
-              const topPx = Math.round(ev.top * ppm);
-              const hPx = Math.max(2, Math.round(ev.height * ppm));
-              const widthPct = 100 / laneCount;
-              const leftPct = ev.lane * widthPct;
-
-              const col = safeColor(ev.n.color);
-              const text = col.hex ? textOn(col.hex) : "#fff";
-              const bg = col.hex ? softBg(col.hex, 0.55) : "rgba(51,102,204,0.55)";
-              const border = col.raw;
-
-              return html`<div
-                class="event"
-                title=${ev.n.summary}
-                style=${`top:${topPx}px;height:${hPx - 2}px;left:${leftPct}%;width:calc(${widthPct}% - 4px);background:${bg};border:1px solid ${border};color:${text}`}
-                @click=${() => this._openDetails(ev.n)}
-              >
-                <div class="title">${ev.n.summary}</div>
-              </div>`;
-            });
-
-      const nowLine = this._config.show_now_indicator && this._weekOffset === 0 ? this._nowLineForDay(i) : nothing;
-
-      cols.push(html`
-        <div class=${isToday ? "col today" : "col"} style=${`grid-column:${2 + i}/${3 + i}`}>
-          <div class=${isToday ? "dayhdr today" : "dayhdr"}>
-            ${labelTxt} ${isToday ? html`<span class="today-pill">${t(this._lang(), "today_pill")}</span>` : nothing}
-          </div>
-          ${allday}
-          <div class="body" style=${`height:${contentPx}px; position:relative`}>${timedBlocks}${nowLine}</div>
-        </div>
-      `);
-    }
-    cols.unshift(html`<style>.grid{height:${contentPx}px}</style>`);
-    return cols;
-  }
-
-  private _nowLineForDay(i: number) {
-    const now = new Date();
-    const start = new Date(this._weekStart);
-    start.setDate(start.getDate() + i);
-    const end = addMin(start, 24 * 60);
-    if (now < start || now > end) return nothing;
-    const ppm = Number(this._config.px_per_min) || 1.6;
-    const mins = (now.getTime() - start.getTime()) / 60000;
-    const yPx = Math.round(mins * ppm);
-    return html`<div class="now" style=${`top:${yPx}px`}></div>`;
-  }
-
-  private _renderDialog() {
-    if (!this._dialogOpen || !this._dialogEvent) return nothing;
-
-    const n = this._dialogEvent;
-    const body = html`
-      <div class="row"><strong>${n.summary}</strong></div>
-      <div class="row">${this._fmtRange(n.s, n.e, n.allDay)}</div>
-      ${n.location ? html`<div class="row">${n.location}</div>` : nothing}
-      ${n.description ? html`<div class="row">${n.description}</div>` : nothing}
-    `;
-
-    // Prefer ha-dialog if present
-    if (customElements.get("ha-dialog")) {
-      return html`
-        <ha-dialog .open=${this._dialogOpen} @closed=${() => this._closeDialog()}>
-          <div slot="heading">${t(this._lang(), "event_details")}</div>
-          ${body}
-          <mwc-button slot="primaryAction" dialogAction="close">${t(this._lang(), "close")}</mwc-button>
-        </ha-dialog>
-      `;
-    }
-
-    // Fallback overlay
-    return html`
-      <div class="overlay" @click=${(e: Event) => (e.target === e.currentTarget ? this._closeDialog() : null)}>
-        <div class="modal" role="dialog" aria-modal="true" aria-label="${t(this._lang(), "event_details")}">
-          <h3>${t(this._lang(), "event_details")}</h3>
-          ${body}
-          <div class="actions">
-            <button class="btn" @click=${() => this._closeDialog()}>${t(this._lang(), "close")}</button>
-          </div>
-        </div>
+      <div class="wc-pill" title=${day.condition}>
+        <ha-icon class="wc-icon" .icon=${icon}></ha-icon>
+        <span class="wc-temp">${hi}${lo ? html`<span class="wc-sep">/</span>${lo}` : nothing}</span>
+        ${rr != null ? html`<span class="wc-meta">· ${Math.round(rr)}%</span>` : nothing}
+        ${ra != null ? html`<span class="wc-meta">· ${Math.round(ra)}mm</span>` : nothing}
       </div>
     `;
   }
 
-  private _anyEvents() {
-    return (this._days || []).some((d) => (d.allDay?.length || 0) + (d.timed?.length || 0) > 0);
+  static styles = `
+    .wc-pill{display:inline-flex;align-items:center;gap:.35rem;font:inherit}
+    .wc-icon{--mdc-icon-size:20px}
+    .wc-temp{font-weight:600}
+    .wc-sep{color:var(--secondary-text-color);margin:0 .125rem}
+    .wc-meta{color:var(--secondary-text-color);margin-left:.25rem;font-size:.9em}
+  `;
+}
+
+export type WcGlue = {
+  wc_setWeather(hass:any, entity:string, days?:number): void;
+  wc_refreshWeather(): Promise<void>;
+  wc_weatherPillFor(date: Date): any; // TemplateResult|nothing
+  wc_weatherUnit(): string;
+  wc_weatherCss(): string;
+};
+
+export const makeWeatherGlue = (): WcGlue => {
+  let cache: WeatherInlineCache | null = null;
+
+  return {
+    wc_setWeather(hass, entity, days = 7) {
+      if (!entity) { cache = null; return; }
+      cache = new WeatherInlineCache(entity, days);
+      cache.setHass(hass);
+    },
+    async wc_refreshWeather() {
+      if (cache) await cache.refreshIfNeeded();
+    },
+    wc_weatherPillFor(date: Date) {
+      return cache ? cache.renderHeaderPill(date) : nothing;
+    },
+    wc_weatherUnit() { return cache ? cache.unit : "°"; },
+    wc_weatherCss() { return WeatherInlineCache.styles; },
+  };
+};
+/* ============================================================================
+   END: Inline Weather Helpers
+   ========================================================================== */
+
+
+/* ============================================================================
+   Multi Calendar Grid Card (baseline)
+   ========================================================================== */
+
+interface MultiCalendarGridCardConfig {
+  type: string;
+  title?: string;
+  weeks?: number;             // default 6
+  start_week_on?: number;     // 0=Sun..6=Sat (default from browser locale heuristic: Mon=1)
+  weather_entity?: string;    // e.g. weather.integra_langsbau_1_3
+  weather_days?: number;      // default 7
+}
+
+export class MultiCalendarGridCard extends LitElement {
+  @property({ attribute: false }) public hass: any;
+  @state() private _config!: MultiCalendarGridCardConfig;
+
+  // Weather glue
+  private _weather = makeWeatherGlue();
+  private _weatherConfigured = false;
+
+  // Calendar grid state
+  @state() private _baseDate: Date = new Date(); // today; center month around this
+  @state() private _days: Date[] = [];
+
+  setConfig(config: MultiCalendarGridCardConfig) {
+    if (!config || config.type !== "custom:multi-calendar-grid-card") {
+      // allow relaxed: if type missing, still accept
+    }
+    this._config = {
+      weeks: 6,
+      start_week_on: undefined,
+      ...config,
+    };
+    this._weatherConfigured = !!this._config.weather_entity;
+
+    // Prepare days immediately
+    this._recomputeDays();
+  }
+
+  set hassProxy(h: any) { this.hass = h; } // (compat)
+
+  setHassInternal(hass: any) {
+    this.hass = hass;
+  }
+
+  set hassSetter(hass: any) {
+    this.hass = hass;
+  }
+
+  set hassUnsafe(hass: any) {
+    this.hass = hass;
+  }
+
+  set hass(hass: any) {
+    (this as any)._hass = hass;
+    if (!hass || !this._config) return;
+
+    // Weather init + refresh
+    if (this._weatherConfigured) {
+      this._weather.wc_setWeather(
+        this.hass,
+        this._config.weather_entity!,
+        this._config.weather_days ?? 7
+      );
+      this._weather.wc_refreshWeather().then(() => this.requestUpdate());
+    }
+
+    // Recompute when month or locale might change (cheap)
+    this._recomputeDays();
+  }
+
+  get hass() {
+    return (this as any)._hass;
+  }
+
+  // Build a 6-week (or user-configured) grid for the month of _baseDate
+  private _recomputeDays() {
+    const weeks = this._config?.weeks ?? 6;
+    const startOn =
+      typeof this._config?.start_week_on === "number"
+        ? this._config.start_week_on!
+        : 1; // default Monday
+
+    const firstOfMonth = new Date(this._baseDate.getFullYear(), this._baseDate.getMonth(), 1);
+    const firstDow = firstOfMonth.getDay(); // 0..6 (Sun..Sat)
+
+    // Compute offset from desired week start
+    let delta = firstDow - startOn;
+    if (delta < 0) delta += 7;
+
+    const gridStart = new Date(firstOfMonth);
+    gridStart.setDate(firstOfMonth.getDate() - delta);
+
+    const totalDays = weeks * 7;
+    const days: Date[] = [];
+    for (let i = 0; i < totalDays; i++) {
+      const d = new Date(gridStart);
+      d.setDate(gridStart.getDate() + i);
+      days.push(d);
+    }
+    this._days = days;
+  }
+
+  private _prevMonth() {
+    const d = new Date(this._baseDate);
+    d.setMonth(d.getMonth() - 1);
+    this._baseDate = d;
+    this._recomputeDays();
+    // refresh weather cache (it groups by key, so it's fine)
+    if (this._weatherConfigured) this._weather.wc_refreshWeather();
+  }
+
+  private _nextMonth() {
+    const d = new Date(this._baseDate);
+    d.setMonth(d.getMonth() + 1);
+    this._baseDate = d;
+    this._recomputeDays();
+    if (this._weatherConfigured) this._weather.wc_refreshWeather();
+  }
+
+  private _today() {
+    this._baseDate = new Date();
+    this._recomputeDays();
+    if (this._weatherConfigured) this._weather.wc_refreshWeather();
+  }
+
+  private _isSameDay(a: Date, b: Date) {
+    return (
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+    );
+  }
+
+  private _inCurrentMonth(d: Date) {
+    return d.getMonth() === this._baseDate.getMonth();
+  }
+
+  static get styles(): CSSResultGroup {
+    return css`
+      :host {
+        display: block;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+      .title {
+        font-weight: 600;
+      }
+      .nav {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .nav button {
+        background: var(--primary-background-color);
+        border: 1px solid var(--divider-color);
+        border-radius: 8px;
+        padding: 6px 10px;
+        cursor: pointer;
+        color: var(--primary-text-color);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 8px;
+      }
+      .dow {
+        text-align: center;
+        font-weight: 600;
+        color: var(--secondary-text-color);
+        margin-bottom: 4px;
+      }
+      .cell {
+        border: 1px solid var(--divider-color);
+        border-radius: 10px;
+        min-height: 86px;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .cell.dimmed {
+        opacity: 0.6;
+      }
+      .dayhead {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .daynum {
+        font-weight: 600;
+      }
+      .today {
+        color: var(--primary-color);
+      }
+      /* Weather pill styles (inline string duplicated for simplicity) */
+      .wc-pill{display:inline-flex;align-items:center;gap:.35rem;font:inherit}
+      .wc-icon{--mdc-icon-size:20px}
+      .wc-temp{font-weight:600}
+      .wc-sep{color:var(--secondary-text-color);margin:0 .125rem}
+      .wc-meta{color:var(--secondary-text-color);margin-left:.25rem;font-size:.9em}
+      .status {
+        color: var(--secondary-text-color);
+        font-size: 12px;
+        margin-top: 6px;
+      }
+      .version {
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        margin-top: 6px;
+        text-align: right;
+      }
+    `;
+  }
+
+  render() {
+    if (!this.hass || !this._config) return nothing;
+
+    const monthLabel = this._baseDate.toLocaleDateString(undefined, {
+      month: "long",
+      year: "numeric",
+    });
+
+    // Weekday labels (start day configurable)
+    const startOn =
+      typeof this._config?.start_week_on === "number"
+        ? this._config.start_week_on!
+        : 1; // default Monday
+    const weekLabels: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const day = (startOn + i) % 7;
+      const d = new Date(2024, 0, 7 + day); // a Sunday-based week reference
+      weekLabels.push(
+        d.toLocaleDateString(undefined, { weekday: "short" })
+      );
+    }
+
+    return html`
+      <ha-card>
+        <div class="header">
+          <div class="title">
+            ${this._config.title ?? "Multi Calendar Grid"}
+            <div class="status">
+              ${this._config.weather_entity
+                ? html`Weather: <code>${this._config.weather_entity}</code> · ${WC_INLINE_VERSION}`
+                : nothing}
+            </div>
+          </div>
+          <div class="nav">
+            <button @click=${this._prevMonth} title="Previous month">‹</button>
+            <button @click=${this._today} title="Go to today">Today</button>
+            <button @click=${this._nextMonth} title="Next month">›</button>
+          </div>
+        </div>
+
+        <!-- Day of week header row -->
+        <div class="grid">
+          ${weekLabels.map(
+            (lbl) => html`<div class="dow">${lbl}</div>`
+          )}
+        </div>
+
+        <!-- Month grid -->
+        <div class="grid">
+          ${this._days.map((d) => {
+            const inMonth = this._inCurrentMonth(d);
+            const isToday = this._isSameDay(d, new Date());
+            const weatherPill = this._weatherConfigured
+              ? this._weather.wc_weatherPillFor(d)
+              : nothing;
+            return html`
+              <div class="cell ${inMonth ? "" : "dimmed"}">
+                <div class="dayhead">
+                  <div class="daynum ${isToday ? "today" : ""}">
+                    ${d.getDate()}
+                  </div>
+                  <div>${weatherPill}</div>
+                </div>
+
+                <!-- TODO: Insert your event list for this day here.
+                     You can render your existing per-day events below. -->
+              </div>
+            `;
+          })}
+        </div>
+
+        <div class="version">Multi Calendar Grid Card v1.0.0-weather-inline</div>
+      </ha-card>
+    `;
+  }
+
+  getCardSize() {
+    // Rough estimate to keep HA happy in masonry layout
+    return 6;
   }
 }
 
-// Register element & card picker metadata
-if (!customElements.get(TAG)) customElements.define(TAG, MultiCalendarGridCard);
+customElements.define("multi-calendar-grid-card", MultiCalendarGridCard);
+
 declare global {
-  interface Window {
-    customCards?: any[];
+  interface HTMLElementTagNameMap {
+    "multi-calendar-grid-card": MultiCalendarGridCard;
   }
-}
-window.customCards = window.customCards || [];
-if (!window.customCards.find((c) => c.type === TAG)) {
-  window.customCards.push({
-    type: TAG,
-    name: "Multi-Calendar Grid Card",
-    description: "7-day time-grid overlay for multiple calendar entities (Lit+TS)",
-    preview: false,
-  });
 }
