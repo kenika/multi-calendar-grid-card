@@ -130,6 +130,23 @@ For release, we typically upload a stable-named bundle:
 
 ---
 
+## Documentation
+
+The most useful docs live in the `/docs` directory:
+
+- **[Architecture](docs/ARCHITECTURE.md)** – How the card is structured and how data flows.
+- **[Development Guide](docs/DEVELOPMENT.md)** – Local dev, building, linting, and release process.
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** – Common issues and fixes.
+
+### Architecture Decision Records (ADRs)
+
+- **[0001: Forecast data source](docs/adr/0001-forecast-data-source.md)** – Why we use the service/REST/attributes fallback order.
+- **[0002: Week start = today](docs/adr/0002-week-start-today.md)** – Rationale for starting the 7-day grid from the current day.
+- **[0003: Weather rendering in headers](docs/adr/0003-weather-rendering-in-headers.md)** – Design choices for minimal, consistent weather display.
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for guidelines on filing issues and sending PRs.
+
+
 ## License
 
 See `LICENSE`.
