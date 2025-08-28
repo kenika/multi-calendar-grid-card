@@ -420,7 +420,7 @@ export class MultiCalendarGridCard extends LitElement {
           }))
         : []; // allow empty preview
     return {
-      type: CARD_TAG,
+      type: `custom:${CARD_TAG}`,
       entities,
       ...DEFAULTS,
       start_today: true,
