@@ -7,7 +7,7 @@ import { LitElement, css, html, nothing } from "lit";
 
 /** Public card type & version */
 export const CARD_TAG = "multi-calendar-grid-card";
-export const VERSION = "0.8.0-dev.3";
+export const VERSION = "0.8.0";
 
 /** Config */
 export type EntityCfg = {
