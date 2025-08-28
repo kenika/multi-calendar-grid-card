@@ -1,6 +1,6 @@
 /**
  * Multi Calendar Grid Card (baseline with inline weather)
- * Version: 1.0.0-weather-inline
+ * Version: 1.0.1-weather-inline
  *
  * Notes:
  * - Self-contained; no external helpers.
@@ -55,7 +55,7 @@ type WcDaily = {
   wind_speed?: number | null;
 };
 
-const WC_INLINE_VERSION = "inline-weather 0.3.2";
+const WC_INLINE_VERSION = "inline-weather 0.3.3";
 
 const wc_num = (v: any): number | null => {
   const n = Number(v);
@@ -434,7 +434,6 @@ export class MultiCalendarGridCard extends LitElement {
     d.setMonth(d.getMonth() - 1);
     this._baseDate = d;
     this._recomputeDays();
-    // refresh weather cache (it groups by key, so it's fine)
     if (this._weatherConfigured) this._weather.wc_refreshWeather();
   }
 
@@ -477,6 +476,10 @@ export class MultiCalendarGridCard extends LitElement {
       }
       .title {
         font-weight: 600;
+      }
+      .subtitle {
+        color: var(--secondary-text-color);
+        font-size: 12px;
       }
       .nav {
         display: flex;
@@ -553,6 +556,7 @@ export class MultiCalendarGridCard extends LitElement {
       month: "long",
       year: "numeric",
     });
+    const titleToShow = this._config.title ?? monthLabel;
 
     // Weekday labels (start day configurable)
     const startOn =
@@ -572,7 +576,10 @@ export class MultiCalendarGridCard extends LitElement {
       <ha-card>
         <div class="header">
           <div class="title">
-            ${this._config.title ?? "Multi Calendar Grid"}
+            ${titleToShow}
+            <div class="subtitle">
+              ${this._config.title ? monthLabel : nothing}
+            </div>
             <div class="status">
               ${this._config.weather_entity
                 ? html`Weather: <code>${this._config.weather_entity}</code> · ${WC_INLINE_VERSION}`
@@ -617,7 +624,7 @@ export class MultiCalendarGridCard extends LitElement {
           })}
         </div>
 
-        <div class="version">Multi Calendar Grid Card v1.0.0-weather-inline</div>
+        <div class="version">Multi Calendar Grid Card v1.0.1-weather-inline</div>
       </ha-card>
     `;
   }
