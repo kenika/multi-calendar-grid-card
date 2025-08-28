@@ -1,9 +1,10 @@
 /* Multi-Calendar Grid Card
  * Native weather headers + start_today logic
- * Version: 0.8.0-dev.4 (no decorators build)
+ * Version: 0.8.0-dev.5 (no decorators build; static-editor import; soft setConfig)
  */
 
 import { LitElement, css, html, nothing } from "lit";
+import "./editor/multi-calendar-grid-card-editor";
 
 /** Public card type & version */
 export const CARD_TAG = "multi-calendar-grid-card";
@@ -417,7 +418,7 @@ export class MultiCalendarGridCard extends LitElement {
             name: states[e]?.attributes?.friendly_name || e,
             color: palette[i % palette.length],
           }))
-        : [{ entity: "calendar.calendar", name: "Calendar", color: palette[0] }];
+        : []; // allow empty preview
     return {
       type: CARD_TAG,
       entities,
@@ -426,22 +427,18 @@ export class MultiCalendarGridCard extends LitElement {
     };
   }
 
-  // Visual editor registration
-  static async getConfigElement() {
-    await import("./editor/multi-calendar-grid-card-editor");
+  // Visual editor registration (static import above ensures element is available)
+  static getConfigElement() {
     return document.createElement("multi-calendar-grid-card-editor");
   }
 
   /** Config */
-  setConfig(cfg: MultiCalendarGridCardConfig) {
-    if (!cfg || !Array.isArray(cfg.entities) || cfg.entities.length === 0) {
-      throw new Error("Config must include at least one entity in 'entities'.");
-    }
-
-    // Merge defaults first, then validate (so YAML may omit times)
+  setConfig(cfg: Partial<MultiCalendarGridCardConfig>) {
+    // Merge defaults first, then validate (so YAML may omit times). Allow empty entities for first-use.
     const merged: MultiCalendarGridCardConfig = {
       ...DEFAULTS,
       ...cfg,
+      entities: Array.isArray(cfg?.entities) ? cfg!.entities! : [],
     };
 
     if (!isHHMMSS(merged.slot_min_time)) throw new Error("slot_min_time must be HH:MM:SS");
@@ -474,7 +471,6 @@ export class MultiCalendarGridCard extends LitElement {
     this._recomputeAnchor();
 
     // Kick initial loads immediately (avoid relying only on updated())
-    // and avoid weather/events race via separate tokens
     this._fetchEvents();
     this._loadWeather();
   }
@@ -500,7 +496,6 @@ export class MultiCalendarGridCard extends LitElement {
   }
   updated(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("_config") || changed.has("_weekAnchor")) {
-      // These are already kicked in setConfig, but keep as safety on further updates
       this._fetchEvents();
       this._loadWeather();
       this.updateComplete.then(() => this._restoreScroll());
