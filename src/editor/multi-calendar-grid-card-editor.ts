@@ -2,7 +2,7 @@
 import {css, html, LitElement, nothing} from 'lit';
 import {customElement, property, state} from 'lit/decorators.js';
 
-type HomeAssistant = any; // HA types are available at runtime; keeping editor dependency-light
+type HomeAssistant = any; // Keep dependency-light; HA provides types at runtime
 type CalendarEntityConfig = {
   entity: string;
   name?: string;
@@ -90,8 +90,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
           .domainFilter=${['calendar']}
           @value-changed=${(e: CustomEvent) => this._updateEntity(idx, 'entity', (e.detail as any).value)}
           label="Calendar entity"
-        >
-        </ha-entity-picker>
+        ></ha-entity-picker>
 
         <ha-textfield
           .value=${row.name ?? ''}
@@ -256,9 +255,9 @@ export class MultiCalendarGridCardEditor extends LitElement {
       <ha-textfield
         type="number"
         .value=${String(value)}
-        .min=${opts.min ?? ''}
-        .max=${opts.max ?? ''}
-        .step=${opts.step ?? ''}
+        .min=${(opts.min ?? '') as any}
+        .max=${(opts.max ?? '') as any}
+        .step=${(opts.step ?? '') as any}
         label=${label}
         @change=${(e: Event) => this._updateRoot(key, Number((e.target as HTMLInputElement).value))}
       ></ha-textfield>
@@ -450,7 +449,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
   `;
 }
 
-// ---- utils & icons ----
+// ---- icons & utils ----
 const mdiCalendarMultiple =
   'M19,19H5V8H19M16,1V3H8V1H6V3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3H18V1M17,12H12V17H17V12Z';
 const mdiViewWeek =
