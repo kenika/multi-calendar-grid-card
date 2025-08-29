@@ -1,6 +1,7 @@
 /* Multi-Calendar Grid Card – Visual Editor
- * Simplified UI, filtered pickers, derived px/min, checkboxes
- * Version: 0.8.0-dev.7
+ * Calendar block layout, max 10, highlight colors with None, capped width
+ * Adds global 12/24h time format
+ * Version: 0.8.0-dev.9
  */
 import { LitElement, css, html, nothing } from "lit";
 
@@ -23,17 +24,20 @@ type CardConfig = {
   show_all_day?: boolean;
   slot_minutes?: number;
   px_per_min?: number;
+  show_now_indicator?: boolean;
 
   // Shown
   slot_min_time?: string;
   slot_max_time?: string;
   height_vh?: number;
-  show_now_indicator?: boolean;
   remember_offset?: boolean;
   data_refresh_minutes?: number;
   locale?: string;
-  highlight_today?: boolean;
-  highlight_weekends?: boolean;
+  time_format?: "12" | "24";
+  // Highlights as colors (empty string disables)
+  today_color?: string;
+  weekend_color?: string;
+  now_line_color?: string;
 };
 
 const DEFAULTS = {
@@ -42,12 +46,15 @@ const DEFAULTS = {
   slot_minutes: 30,
   px_per_min: 1.6,
   height_vh: 80,
-  show_now_indicator: true,
   remember_offset: true,
   data_refresh_minutes: 5,
-  highlight_today: true,
-  highlight_weekends: true,
+  time_format: "24",
+  today_color: "rgba(33,150,243,.10)",
+  weekend_color: "rgba(0,0,0,.05)",
+  now_line_color: "#e53935",
 } as const;
+
+const MAX_CALENDARS = 10;
 
 export class MultiCalendarGridCardEditor extends LitElement {
   hass: any;
@@ -63,15 +70,11 @@ export class MultiCalendarGridCardEditor extends LitElement {
       ...config,
       entities: Array.isArray(config.entities) ? [...config.entities] : [],
     };
-    // Ensure derived px/min on load
     this._syncDerivedPxPerMin();
   }
 
   private _updateConfig(patch: Partial<CardConfig>) {
-    const next: CardConfig = {
-      ...this._config,
-      ...patch,
-    };
+    const next: CardConfig = { ...this._config, ...patch };
     this._config = next;
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: next } }));
   }
@@ -85,6 +88,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
   private _addEntity() {
     const ents = [...(this._config.entities || [])];
+    if (ents.length >= MAX_CALENDARS) return;
     ents.push({ entity: "", name: "", color: "#3f51b5" });
     this._updateConfig({ entities: ents });
   }
@@ -127,77 +131,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
     return v === undefined || v === null ? d : v;
   }
 
-  render() {
-    const ents = this._config.entities || [];
-    const minTime = (this._config.slot_min_time || DEFAULTS.slot_min_time).slice(0,5);
-    const maxTime = (this._config.slot_max_time || DEFAULTS.slot_max_time).slice(0,5);
-
-    return html`
-      <div class="wrap">
-        ${this._entitiesSection(ents)}
-        ${this._weatherSection()}
-        ${this._gridSection(minTime, maxTime)}
-        ${this._behaviorSection()}
-      </div>
-    `;
-  }
-
-  private _entitiesSection(ents: EntityCfg[]) {
-    return html`
-      <div class="section">
-        <div class="section-title">Calendars</div>
-        ${ents.length === 0 ? html`<div class="hint">Add one or more <code>calendar.*</code> entities.</div>` : nothing}
-        ${ents.map((row, i) => this._entityRow(row, i))}
-        <div class="row">
-          <div></div>
-          <button class="btn" @click=${this._addEntity}>Add calendar</button>
-        </div>
-      </div>
-    `;
-  }
-
-  private _entityRow(row: EntityCfg, i: number) {
-    return html`
-      <div class="row">
-        <label>Calendar ${i + 1}</label>
-        <div class="stack">
-          <ha-entity-picker
-            .hass=${this.hass}
-            .value=${row.entity}
-            .includeDomains=${["calendar"]}
-            @value-changed=${(ev: any) => this._updateEntity(i, { entity: ev.detail.value || "" })}
-          ></ha-entity-picker>
-
-          <div class="rowgrid">
-            <input
-              class="name"
-              type="text"
-              placeholder="Display name (optional)"
-              .value=${row.name || ""}
-              @input=${(ev: any) => this._updateEntity(i, { name: ev.target.value })}
-            />
-
-            <div class="colorwrap">
-              <input
-                class="color"
-                title="Color"
-                type="color"
-                .value=${this._validColor(row.color) || "#3f51b5"}
-                @input=${(ev: any) => this._updateEntity(i, { color: ev.target.value })}
-              />
-            </div>
-          </div>
-
-          <div class="row right">
-            <div></div>
-            <button class="btn danger" @click=${() => this._removeEntity(i)}>Remove</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  private _validColor(c?: string) {
+  private _validColorHex(c?: string) {
     if (!c) return null;
     const t = String(c).trim();
     if (/^#([0-9a-f]{6})$/i.test(t)) return t;
@@ -206,6 +140,79 @@ export class MultiCalendarGridCardEditor extends LitElement {
       return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
     }
     return null;
+  }
+
+  render() {
+    const ents = this._config.entities || [];
+    const minTime = (this._config.slot_min_time || DEFAULTS.slot_min_time).slice(0,5);
+    const maxTime = (this._config.slot_max_time || DEFAULTS.slot_max_time).slice(0,5);
+    const reachedMax = ents.length >= MAX_CALENDARS;
+    const tf = this._safe(this._config.time_format, DEFAULTS.time_format);
+
+    return html`
+      <div class="wrap">
+        ${this._calendarsSection(ents, reachedMax)}
+        ${this._weatherSection()}
+        ${this._gridSection(minTime, maxTime)}
+        ${this._timeFormatSection(tf)}
+        ${this._highlightsSection()}
+        ${this._behaviorSection()}
+      </div>
+    `;
+  }
+
+  private _calendarsSection(ents: EntityCfg[], reachedMax: boolean) {
+    return html`
+      <div class="section">
+        <div class="section-title">Calendars</div>
+
+        ${ents.map((row, i) => this._calendarBlock(row, i))}
+
+        <div class="add-row">
+          <button class="add-btn" ?disabled=${reachedMax} @click=${this._addEntity}>＋ Add calendar</button>
+          ${reachedMax ? html`<span class="hint">Max ${MAX_CALENDARS} calendars</span>` : nothing}
+        </div>
+      </div>
+    `;
+  }
+
+  private _calendarBlock(row: EntityCfg, i: number) {
+    const colorVal = this._validColorHex(row.color) || "#3f51b5";
+    return html`
+      <div class="cal-block">
+        <div class="cal-head">Calendar ${i + 1}</div>
+        <div class="cal-grid">
+          <div class="c1">
+            <ha-entity-picker
+              .hass=${this.hass}
+              .value=${row.entity}
+              .includeDomains=${["calendar"]}
+              allow-custom-entity
+              @value-changed=${(ev: any) => this._updateEntity(i, { entity: ev.detail.value || "" })}
+            ></ha-entity-picker>
+          </div>
+
+          <div class="c2">
+            <input
+              class="name"
+              type="text"
+              placeholder="Display name (optional)"
+              .value=${row.name || ""}
+              @input=${(ev: any) => this._updateEntity(i, { name: ev.target.value })}
+            />
+            <button class="color-btn" style=${`--clr:${colorVal}`} @click=${(ev: any) => {
+              const inp: HTMLInputElement | null = ev.currentTarget?.parentElement?.querySelector('input[type="color"]');
+              if (inp) inp.click();
+            }}>Color</button>
+            <input type="color" class="color" .value=${colorVal} @input=${(ev: any) => this._updateEntity(i, { color: ev.target.value })} />
+          </div>
+
+          <div class="cDel">
+            <button class="del-btn" title="Remove" @click=${() => this._removeEntity(i)}>-</button>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   private _weatherSection() {
@@ -252,25 +259,58 @@ export class MultiCalendarGridCardEditor extends LitElement {
     `;
   }
 
+  private _timeFormatSection(tf: "12" | "24") {
+    return html`
+      <div class="section">
+        <div class="section-title">Time format</div>
+        <div class="row">
+          <label>Display format</label>
+          <div class="tf-row">
+            <label><input type="radio" name="tf" value="24" .checked=${tf === "24"} @change=${(e: any) => this._updateConfig({ time_format: "24" })} /> 24-hour</label>
+            <label><input type="radio" name="tf" value="12" .checked=${tf === "12"} @change=${(e: any) => this._updateConfig({ time_format: "12" })} /> 12-hour</label>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private _highlightsSection() {
+    return html`
+      <div class="section">
+        <div class="section-title">Highlights</div>
+
+        ${this._colorRow("Today highlight", "today_color", this._safe(this._config.today_color, DEFAULTS.today_color))}
+        ${this._colorRow("Weekend highlight", "weekend_color", this._safe(this._config.weekend_color, DEFAULTS.weekend_color))}
+        ${this._colorRow("Now line", "now_line_color", this._safe(this._config.now_line_color, DEFAULTS.now_line_color))}
+        <div class="hint">Set a color, or choose “None” to disable. Hex colors recommended; rgba works in YAML.</div>
+      </div>
+    `;
+  }
+
+  private _colorRow(labelTxt: string, key: "today_color" | "weekend_color" | "now_line_color", val: string) {
+    const none = (val || "") === "";
+    const hex = this._validColorHex(val) || "#2196f3";
+    return html`
+      <div class="row">
+        <label>${labelTxt}</label>
+        <div class="color-row">
+          <label class="none"><input type="checkbox" .checked=${none} @change=${(ev: any) => {
+            this._updateConfig({ [key]: ev.target.checked ? "" : hex } as any);
+          }} /> None</label>
+          <button class="color-btn big" style=${`--clr:${hex}`} ?disabled=${none} @click=${(ev: any) => {
+            const inp: HTMLInputElement | null = (ev.currentTarget as HTMLElement).parentElement?.querySelector('input[type="color"]');
+            if (inp) inp.click();
+          }}>Pick color</button>
+          <input type="color" class="color" .value=${hex} ?disabled=${none} @input=${(ev: any) => this._updateConfig({ [key]: ev.target.value } as any)} />
+        </div>
+      </div>
+    `;
+  }
+
   private _behaviorSection() {
     return html`
       <div class="section">
         <div class="section-title">Behavior</div>
-
-        <div class="row">
-          <label><input type="checkbox"
-            .checked=${this._safe(this._config.show_now_indicator, DEFAULTS.show_now_indicator)}
-            @change=${(ev: any) => this._updateConfig({ show_now_indicator: ev.target.checked })} />
-            Show now indicator</label>
-        </div>
-
-        <div class="row">
-          <label><input type="checkbox"
-            .checked=${this._safe(this._config.remember_offset, DEFAULTS.remember_offset)}
-            @change=${(ev: any) => this._updateConfig({ remember_offset: ev.target.checked })} />
-            Remember scroll position</label>
-        </div>
-
         <div class="row">
           <label>Refresh interval (min)</label>
           <input type="number" min="1" max="60" .value=${this._safe(this._config.data_refresh_minutes, DEFAULTS.data_refresh_minutes)}
@@ -279,16 +319,9 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
         <div class="row">
           <label><input type="checkbox"
-            .checked=${this._safe(this._config.highlight_today, DEFAULTS.highlight_today)}
-            @change=${(ev: any) => this._updateConfig({ highlight_today: ev.target.checked })} />
-            Highlight today</label>
-        </div>
-
-        <div class="row">
-          <label><input type="checkbox"
-            .checked=${this._safe(this._config.highlight_weekends, DEFAULTS.highlight_weekends)}
-            @change=${(ev: any) => this._updateConfig({ highlight_weekends: ev.target.checked })} />
-            Highlight weekends</label>
+            .checked=${this._safe(this._config.remember_offset, true)}
+            @change=${(ev: any) => this._updateConfig({ remember_offset: ev.target.checked })} />
+            Remember scroll position</label>
         </div>
       </div>
     `;
@@ -296,32 +329,44 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
   static styles = css`
     :host { display: block; }
-    .wrap { display: grid; gap: 16px; padding: 6px; }
+    .wrap { display: grid; gap: 16px; padding: 8px; max-width: var(--mcg-editor-max-width, 820px); }
 
     .section { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 12px; padding: 12px; background: var(--card-background-color, #fff); overflow: visible; }
     .section-title { font-weight: 700; margin-bottom: 10px; }
 
     .row { display: grid; grid-template-columns: 220px 1fr; align-items: center; gap: 12px; margin: 8px 0; }
     .row.two { grid-template-columns: 220px auto; }
-    .right { grid-template-columns: 1fr auto; }
 
-    .stack { display: grid; gap: 8px; }
-    .rowgrid { display: grid; grid-template-columns: minmax(180px,1fr) auto; gap: 8px; align-items: center; }
-    .twocol { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+    .add-row { display:flex; align-items:center; gap:10px; margin-top: 10px; }
+    .add-btn { all: unset; cursor: pointer; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.06); }
+    .add-btn[disabled] { opacity:.5; cursor: not-allowed; }
 
-    label { color: var(--primary-text-color); font-weight: 500; }
-    .hint { color: var(--secondary-text-color); font-size: 12px; margin-top: 4px; }
+    .cal-block { border: 1px dashed var(--divider-color, #ddd); border-radius: 10px; padding: 10px; margin: 10px 0; }
+    .cal-head { font-weight: 700; margin-bottom: 8px; }
 
-    .btn { all: unset; cursor: pointer; padding: 8px 12px; border-radius: 10px; background: rgba(0,0,0,.06); text-align: center; }
-    .btn:hover { filter: brightness(0.95); }
-    .btn.danger { background: rgba(229, 57, 53, .12); }
+    /* 2-row grid with delete button spanning rows */
+    .cal-grid { display: grid; grid-template-columns: 1fr 52px; grid-template-rows: 48px 48px; gap: 10px; align-items: center; }
+    .cal-grid .c1 { grid-column: 1 / 2; grid-row: 1 / 2; }
+    .cal-grid .c2 { grid-column: 1 / 2; grid-row: 2 / 3; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+    .cal-grid .cDel { grid-column: 2 / 3; grid-row: 1 / 3; align-self: center; display:flex; align-items:center; justify-content:center; }
+
+    .del-btn { all: unset; width: 44px; height: 44px; border-radius: 12px; background: rgba(229,57,53,.12); cursor: pointer; display:flex; align-items:center; justify-content:center; font-size: 24px; }
+    .del-btn:hover { filter: brightness(0.96); }
 
     input[type="text"], input[type="number"], input[type="time"] { height: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); color: var(--primary-text-color, #111); }
-    .colorwrap{ display:flex; align-items:center; }
-    input[type="color"] { width: 40px; height: 40px; padding: 0; border: none; background: transparent; }
+
+    .color-btn { all: unset; cursor: pointer; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); }
+    .color-btn.big { width: 140px; }
+    .color-btn::before { content: ""; display:inline-block; width: 16px; height: 16px; border-radius: 4px; background: var(--clr, #2196f3); margin-right: 8px; vertical-align: middle; }
+    input[type="color"].color { visibility: hidden; width: 0; height: 0; padding: 0; margin: 0; border: 0; }
+
+    .tf-row { display:flex; gap:16px; align-items:center; }
+    .color-row { display:flex; align-items:center; gap: 12px; }
+    .color-row .none { display:flex; align-items:center; gap: 8px; }
 
     ha-entity-picker { width: 100%; --mdc-menu-max-height: 300px; }
-    code { background: rgba(0,0,0,.06); padding: 2px 6px; border-radius: 6px; }
+    .hint { color: var(--secondary-text-color); font-size: 12px; margin-top: 4px; }
+    label { color: var(--primary-text-color); font-weight: 500; }
   `;
 }
 
