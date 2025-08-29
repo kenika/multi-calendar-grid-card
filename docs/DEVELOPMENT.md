@@ -11,7 +11,7 @@
 
 ```bash
 npm ci
-npm test           # run lint + type-check
+npm test           # run type-check, lint, and unit tests
 npm run build      # bundle for HA
 ```
 
