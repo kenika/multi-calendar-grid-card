@@ -52,9 +52,10 @@ first_day: 1               # 0=Sun … 6=Sat (used only if start_today: false)
 start_today: true          # start the 7-day view at “today”
 slot_min_time: '07:00:00'  # HH:MM:SS
 slot_max_time: '22:00:00'  # HH:MM:SS
-slot_minutes: 60           # grid step; 30–180 recommended
+slot_minutes: 60           # grid step; 1–180 (30–180 recommended)
 height_vh: 80              # card height (viewport %). 60–90 typical
 px_per_min: 1.6            # minute scale; leave default unless tuning
+legend_button_ch: 15       # legend button width in ch units
 header_compact: false
 show_now_indicator: true
 show_all_day: true
@@ -76,6 +77,7 @@ Each calendar entry accepts:
 ### Time & layout
 - The grid always renders a full day (00:00–24:00); **`slot_min_time`/`slot_max_time`** control **focus** and default scroll position.
 - **`px_per_min`** defines vertical scale. In dev.12 this is **explicit**; (later versions may derive this value).
+- **`legend_button_ch`** sets the minimum width of each legend button (in `ch`). Use `0` for no minimum.
 
 ### Weather
 The card tries, in order:

@@ -23,7 +23,7 @@ export type MultiCalendarGridCardConfig = {
   start_today?: boolean;        // default true
   slot_min_time?: string;       // "07:00:00"
   slot_max_time?: string;       // "22:00:00"
-  slot_minutes?: number;        // 30..180
+  slot_minutes?: number;        // 1–180 (30–180 recommended)
   locale?: string;
   /** Global time format for labels and dialog */
   time_format?: "12" | "24";
@@ -34,6 +34,7 @@ export type MultiCalendarGridCardConfig = {
   header_compact?: boolean;
   height_vh?: number;
   px_per_min?: number;
+  legend_button_ch?: number;
   remember_offset?: boolean;
   storage_key?: string;
 
@@ -66,6 +67,7 @@ const DEFAULTS: Required<Pick<
   | "height_vh"
   | "remember_offset"
   | "header_compact"
+  | "legend_button_ch"
   | "data_refresh_minutes"
   | "px_per_min"
   | "storage_key"
@@ -82,6 +84,7 @@ const DEFAULTS: Required<Pick<
   height_vh: 80,
   remember_offset: true,
   header_compact: false,
+  legend_button_ch: 15,
   data_refresh_minutes: 5,
   px_per_min: 1.6,
   storage_key: `${CARD_TAG}.weekOffset`,
@@ -194,7 +197,7 @@ const condIcon = (raw?: string) => {
 };
 
 /** Weather fetch (robust) */
-type WItem = {
+export type WItem = {
   datetime?: string;
   date?: string;
   time?: string;
@@ -249,7 +252,7 @@ async function wsForecast(hass: any, entity_id: string, type: "daily" | "hourly"
   const list = data?.forecast ?? [];
   return Array.isArray(list) ? (list as WItem[]) : [];
 }
-function aggregateHourlyToDaily(hourly: WItem[], daysWanted: number): WItem[] {
+export function aggregateHourlyToDaily(hourly: WItem[], daysWanted: number): WItem[] {
   const by = new Map<string, WItem[]>();
   const todayK = dayKey(new Date());
   for (const h of hourly) {
@@ -380,7 +383,7 @@ export class MultiCalendarGridCard extends LitElement {
     .hdr{display:flex; justify-content:space-between; align-items:center; gap:14px; margin:12px}
     /* LEGEND as full-color buttons */
     .legend{display:flex; gap:8px; flex-wrap:wrap; font-size:14px}
-    .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; min-width:110px; text-align:center}
+    .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; text-align:center}
     .legend .btn.active{border-color:transparent}
     .legend .name{font-weight:600}
     .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
@@ -694,7 +697,7 @@ export class MultiCalendarGridCard extends LitElement {
     for (let d = 0; d < (this._config.visible_days || 7); d++) {
       const dayStart = addMinutes(start, d * 24 * 60);
       const dayEnd = addMinutes(dayStart, 24 * 60);
-      const alls: CalEvent[] = [];
+      const allDayEvents: CalEvent[] = [];
       type TTimed = { n: CalEvent; start: number; end: number; top: number; height: number; lane: number; cols: number };
       const rawList: TTimed[] = [];
 
@@ -702,7 +705,7 @@ export class MultiCalendarGridCard extends LitElement {
         const n = this._normalizeEvent(raw, raw.__id);
         if ((n.allDay ? new Date(n.e.getTime() - 1) : n.e) > dayStart && n.s < dayEnd) {
           if (n.allDay) {
-            if (this._config.show_all_day) alls.push(n);
+            if (this._config.show_all_day) allDayEvents.push(n);
           } else {
             const startMin = Math.max(0, (n.s.getTime() - dayStart.getTime()) / 60000);
             const endMin = Math.max(0, (n.e.getTime() - dayStart.getTime()) / 60000);
@@ -750,7 +753,7 @@ export class MultiCalendarGridCard extends LitElement {
 
       const timed = groups.flatMap(g => g.members);
       const laneCount = Math.max(1, ...groups.map(g => g.maxCols));
-      days.push({ date: dayStart, allDay: alls, timed, laneCount });
+      days.push({ date: dayStart, allDay: allDayEvents, timed, laneCount });
     }
 
     if (myFetch === this._lastEventsFetchId) {
@@ -883,8 +886,10 @@ export class MultiCalendarGridCard extends LitElement {
 
     const hex = colorToHex(e.color || "#3366cc") || "#3366cc";
     const fg = fgOn(hex);
-    const styleActive = `background:${hex}; color:${fg}; border-color:transparent`;
-    const styleInactive = `background:${rgba(hex,0.12)}; border:1px solid ${hex}; color:var(--secondary-text-color,#555)`;
+    const width = Math.max(0, this._config.legend_button_ch ?? DEFAULTS.legend_button_ch);
+    const baseStyle = `min-width:${width}ch`;
+    const styleActive = `${baseStyle}; background:${hex}; color:${fg}; border-color:transparent`;
+    const styleInactive = `${baseStyle}; background:${rgba(hex,0.12)}; border:1px solid ${hex}; color:var(--secondary-text-color,#555)`;
 
     return html`<button class="btn ${active ? "active" : ""}" style=${active ? styleActive : styleInactive} @click=${toggle}>
       <span class="name">${e.name || e.entity}</span>
@@ -894,7 +899,7 @@ export class MultiCalendarGridCard extends LitElement {
   private _timeColumn() {
     const ticks: unknown[] = [];
     const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
-    const step = Number(this._config.slot_minutes) || DEFAULTS.slot_minutes;
+    const step = Number(this._config.slot_minutes ?? DEFAULTS.slot_minutes);
     const use12 = this._config.time_format === "12";
     const lang = this._lang();
     const tf = new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit", hour12: use12 });
@@ -928,7 +933,7 @@ export class MultiCalendarGridCard extends LitElement {
 
     const todayColor = typeof this._config.today_color === "string" ? this._config.today_color : "#c8e3f9";
     const weekendColor = typeof this._config.weekend_color === "string" ? this._config.weekend_color : "#f0f0f0";
-    const step = Number(this._config.slot_minutes) || DEFAULTS.slot_minutes;
+    const step = Number(this._config.slot_minutes ?? DEFAULTS.slot_minutes);
 
     for (let d = 0; d < (this._config.visible_days || 7); d++) {
       const date = addMinutes(start, d * 24 * 60);
@@ -1096,13 +1101,17 @@ function stripMarkup(s?: string): string {
 }
 
 /** Define element (no decorator) and card registration */
-if (!customElements.get(CARD_TAG)) customElements.define(CARD_TAG, MultiCalendarGridCard as any);
-(window as any).customCards = (window as any).customCards || [];
-if (!(window as any).customCards.find((c: any) => c.type === CARD_TAG)) {
-  (window as any).customCards.push({
-    type: CARD_TAG,
-    name: "Multi-Calendar Grid Card",
-    description: "N-day time-grid overlay for multiple calendar entities (Lit+TS)",
-    preview: false,
-  });
+if (typeof window !== "undefined") {
+  if (!customElements.get(CARD_TAG)) {
+    customElements.define(CARD_TAG, MultiCalendarGridCard as any);
+  }
+  (window as any).customCards = (window as any).customCards || [];
+  if (!(window as any).customCards.find((c: any) => c.type === CARD_TAG)) {
+    (window as any).customCards.push({
+      type: CARD_TAG,
+      name: "Multi-Calendar Grid Card",
+      description: "N-day time-grid overlay for multiple calendar entities (Lit+TS)",
+      preview: false,
+    });
+  }
 }
