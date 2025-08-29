@@ -27,7 +27,7 @@
 3. **Layout engine**
    - Event normalization (all‑day vs timed)
    - Per‑day overlap resolution into lanes
-   - `px_per_min` controls vertical scale (explicit in dev.12)
+   - `px_per_min` controls vertical scale (derived from height and focus window)
    - LocalStorage for `weekOffset` and `scrollTop`
 
 4. **Dialog (minimal)**

@@ -69,7 +69,6 @@ const DEFAULTS: Required<Pick<
   | "header_compact"
   | "legend_button_ch"
   | "data_refresh_minutes"
-  | "px_per_min"
   | "storage_key"
   | "start_today"
   | "visible_days"
@@ -81,12 +80,11 @@ const DEFAULTS: Required<Pick<
   time_format: "24",
   show_now_indicator: true,
   show_all_day: true,
-  height_vh: 80,
+  height_vh: 60,
   remember_offset: true,
   header_compact: false,
   legend_button_ch: 15,
   data_refresh_minutes: 5,
-  px_per_min: 1.6,
   storage_key: `${CARD_TAG}.weekOffset`,
   start_today: true,
   visible_days: 7,
@@ -361,6 +359,7 @@ export class MultiCalendarGridCard extends LitElement {
   private _tick?: number;
   private _refresh?: number;
   private _nsBase = "";
+  private _timeColPad = 0;
 
   /** Reactive properties (no decorators) */
   static properties = {
@@ -386,22 +385,21 @@ export class MultiCalendarGridCard extends LitElement {
     .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; text-align:center}
     .legend .btn.active{border-color:transparent}
     .legend .name{font-weight:600}
-    .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
     .toolbar button{all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06)}
     .toolbar button:focus{outline:2px solid var(--primary-color)}
     .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
     .empty{color:var(--secondary-text-color); padding:8px 12px; font-size:12px}
-    .scroll{height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
+    .scroll{height: var(--mcg-height, 60vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
     .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0)}
     .col{background:var(--card-background-color,#fff); position:relative}
-    .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
+    .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:5; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
     .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .timecol{background:var(--card-background-color,#fff); position:relative}
     .tick{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.22); z-index:1}
     .tick.minor{border-top:1px dashed rgba(0,0,0,.14)}
     .hour-label{position:absolute; top:-8px; left:6px; font-size:12px; color:var(--secondary-text-color); z-index:2; background: var(--card-background-color,#fff); padding:0 4px}
-    .body{position:relative}
+    .body{position:relative; overflow:hidden}
     .gridline{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.22); z-index:1}
     .gridline.minor{border-top:1px dashed rgba(0,0,0,.14)}
     .event{position:absolute; border-radius:10px; padding:6px 8px; box-sizing:border-box; font-size:12px; line-height:1.15; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.12); z-index:2}
@@ -503,13 +501,21 @@ export class MultiCalendarGridCard extends LitElement {
     this._stopTimers();
   }
   firstUpdated(): void {
-    this.updateComplete.then(() => this._restoreScroll());
+    this.updateComplete.then(() => {
+      this._measureTimeColPad();
+      this._restoreScroll();
+    });
   }
   updated(changed: Map<PropertyKey, unknown>): void {
     if (changed.has("_config") || changed.has("_weekAnchor")) {
       this._fetchEvents();
       this._loadWeather();
-      this.updateComplete.then(() => this._restoreScroll());
+      this.updateComplete.then(() => {
+        this._measureTimeColPad();
+        this._restoreScroll();
+      });
+    } else {
+      this.updateComplete.then(() => this._measureTimeColPad());
     }
   }
 
@@ -553,8 +559,8 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _restoreScroll() {
     const minMin = toMinutes(this._config.slot_min_time!);
-    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
-    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin)); // align to exact minute, no fudge
+    const pxPerMin = this._pxPerMin();
+    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin + this._timeColPad)); // align to exact minute, no fudge
     let top = defaultTop;
     if (this._config.remember_offset) {
       try {
@@ -577,6 +583,34 @@ export class MultiCalendarGridCard extends LitElement {
       localStorage.setItem(`${this._nsBase}.scrollTop`, String(sc.scrollTop));
     } catch {}
   };
+
+  private _pxPerMin() {
+    let ppm = Number(this._config.px_per_min);
+    if (!Number.isFinite(ppm) || ppm <= 0) {
+      const vh = Number(this._config.height_vh || DEFAULTS.height_vh);
+      const winH = typeof window !== "undefined" ? window.innerHeight || 800 : 800;
+      const focus = Math.max(
+        1,
+        toMinutes(this._config.slot_max_time!) - toMinutes(this._config.slot_min_time!)
+      );
+      ppm = ((vh / 100) * winH) / focus;
+    }
+    return Math.round(ppm * 100) / 100;
+  }
+
+  private _measureTimeColPad() {
+    const col = this.renderRoot?.querySelector(".col") as HTMLElement | null;
+    const body = col?.querySelector(".body") as HTMLElement | null;
+    if (col && body) {
+      const pad = Math.round(
+        body.getBoundingClientRect().top - col.getBoundingClientRect().top
+      );
+      if (pad !== this._timeColPad) {
+        this._timeColPad = pad;
+        this.requestUpdate();
+      }
+    }
+  }
 
   private async _loadWeather() {
     const entity = this._config.weather_entity;
@@ -825,9 +859,7 @@ export class MultiCalendarGridCard extends LitElement {
 
   render() {
     const start = this._weekAnchor;
-    const end = addMinutes(new Date(start), (this._config.visible_days || 7) * 24 * 60 - 1);
     const lang = this._lang();
-    const rf = new Intl.DateTimeFormat(lang, { day: "2-digit", month: "short" });
     const vh = Number(this._config.height_vh || DEFAULTS.height_vh);
 
     return html`
@@ -835,9 +867,6 @@ export class MultiCalendarGridCard extends LitElement {
         <div class="hdr">
           <div class="legend">
             ${this._config.entities.map((e) => this._legendItem(e))}
-          </div>
-          <div class="badge" title="${this._error ? this._error : ""}">
-            ${rf.format(start)} – ${rf.format(end)}
           </div>
           <div class="toolbar">
             <button type="button" aria-label="${tr(lang, "aria_prev_week")}" @click=${() => this._shiftWeek(-1)}>${tr(
@@ -898,7 +927,7 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _timeColumn() {
     const ticks: unknown[] = [];
-    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
+    const pxPerMin = this._pxPerMin();
     const step = Number(this._config.slot_minutes ?? DEFAULTS.slot_minutes);
     const use12 = this._config.time_format === "12";
     const lang = this._lang();
@@ -912,7 +941,7 @@ export class MultiCalendarGridCard extends LitElement {
         ticks.push(html`<div class="hour-label" style=${`top:${top - 8}px`}>${label}</div>`);
       }
     }
-    return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative">${ticks}</div>`;
+    return html`<div class="timecol" style=${`grid-column:1/2; grid-row:1/-1; position:relative; padding-top:${this._timeColPad}px`}>${ticks}</div>`;
   }
 
   private _gridLinesDom(pxPerMin: number, stepMin: number) {
@@ -927,7 +956,7 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _dayColumns(start: Date) {
     const out: unknown[] = [];
-    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
+    const pxPerMin = this._pxPerMin();
     const columnHeight = Math.round(1440 * pxPerMin);
     const today = startOfDay(new Date());
 
@@ -995,7 +1024,7 @@ export class MultiCalendarGridCard extends LitElement {
       `);
     }
 
-    out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr); height:${columnHeight}px}</style>`);
+    out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr); height:${columnHeight + this._timeColPad}px}</style>`);
     return out;
   }
 
@@ -1024,7 +1053,7 @@ export class MultiCalendarGridCard extends LitElement {
     const color = typeof colorRaw === "string" ? colorRaw : "#e53935";
     if (!showLegacy || color === "") return nothing;
 
-    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
+    const pxPerMin = this._pxPerMin();
     const start = addMinutes(this._weekAnchor, dayIndex * 24 * 60);
     const end = addMinutes(start, 24 * 60);
     const now = new Date();
