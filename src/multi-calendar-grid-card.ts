@@ -470,10 +470,6 @@ export class MultiCalendarGridCard extends LitElement {
     if (!(el as any).setConfig) { (el as any).setConfig = function(_: any) {}; }
     return el;
   }
-    const el = document.createElement("div");
-    el.innerHTML = `<div style="padding:8px">UI editor is loading… if it doesn't appear, use YAML for now.</div>`;
-    return el;
-  }
 
   /** Config */
   setConfig(cfg: Partial<MultiCalendarGridCardConfig>) {
