@@ -1,6 +1,5 @@
 /* Multi-Calendar Grid Card – Visual Editor
- * Calendar block layout; highlight colors; 12/24h; time pickers; visible days
- * Version: 0.8.0-dev.11
+ * v0.8.0-dev.12 — compact hints; calendar blocks; visible days; time pickers; 12/24h
  */
 import { LitElement, css, html, nothing } from "lit";
 
@@ -279,7 +278,6 @@ export class MultiCalendarGridCardEditor extends LitElement {
             @value-changed=${(ev: any) => this._updateConfig({ weather_entity: ev.detail.value || "" })}
           ></ha-entity-picker>
         </div>
-        <div class="hint">Forecast days and compact options are hidden in UI for now (kept in config).</div>
       </div>
     `;
   }
@@ -359,7 +357,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
         ${this._colorRow("Today highlight", "today_color", this._safe(this._config.today_color, DEFAULTS.today_color))}
         ${this._colorRow("Weekend highlight", "weekend_color", this._safe(this._config.weekend_color, DEFAULTS.weekend_color))}
         ${this._colorRow("Now line", "now_line_color", this._safe(this._config.now_line_color, DEFAULTS.now_line_color))}
-        <div class="hint">Set a color, or choose “None” to disable. Hex colors recommended; rgba works in YAML.</div>
+        <div class="hint">Pick a color or choose ‘None’ to disable.</div>
       </div>
     `;
   }
