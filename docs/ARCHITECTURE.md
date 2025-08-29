@@ -1,26 +1,55 @@
-# Architecture Overview
+# Architecture
 
-**Multi-Calendar Grid Card** renders a 7-day time grid for multiple `calendar.*` entities and (optionally) overlays daily weather in each day header.
+> Baseline: **v0.8.0-dev.12**
 
-## Key parts
+## Overview
 
-- **Card (Lit element)**: `<multi-calendar-grid-card>`
-  - Fetches events via Home Assistant REST API:  
-    `GET /api/calendars/<calendar.entity>?start=<ISO>&end=<ISO>`
-  - Lays out all-day and timed events, computes lanes, draws “now” line.
-  - Supports options: `first_day`, `slot_*`, `px_per_min`, `remember_offset`, etc.
-  - (From v0.8.0) Week start can be **today**.
+- **Library**: Lit + TypeScript
+- **Custom element**: `<multi-calendar-grid-card>`
+- **Goal**: A rolling 7‑day, multi‑calendar **time grid** with native weather in headers.
 
-- **Weather overlay (addon script)**
-  - Small, separate JS that hooks into the card to render forecast in headers when:
-    - `weather_entity` is set (e.g. `weather.integra_langsbau_1_3`)
-    - The addon script is loaded as a Lovelace Resource.
-  - Fetch strategy prefers official HA services/endpoints but falls back to the simplest working calls (see ADR-0001).
+## Main modules
 
-## Why an addon script?
+1. **Rendering (LitElement)**
+   - Header toolbar (legend and navigation)
+   - Sticky day headers (date + weather)
+   - All‑day row
+   - Time grid body (00:00–24:00); events positioned using minute offsets
 
-- Decouples weather experiments from the card core (fewer rebuilds, safer iterations).
-- Lets users opt-in and disable independently.
-- Keeps the main bundle smaller and avoids mixed concerns.
+2. **Data fetchers**
+   - **Calendar**: Home Assistant REST API `GET /calendars/{entity}?start=...&end=...`
+   - **Weather**: robust strategy
+     - WS `weather.get_forecasts` (`daily`)
+     - WS `weather.get_forecasts` (`hourly` → aggregated to daily)
+     - REST `/api/weather/forecast`
+     - Fallback to `attributes.forecast`
 
-See `/docs/adr` for design decisions and trade-offs.
+3. **Layout engine**
+   - Event normalization (all‑day vs timed)
+   - Per‑day overlap resolution into lanes
+   - `px_per_min` controls vertical scale (explicit in dev.12)
+   - LocalStorage for `weekOffset` and `scrollTop`
+
+4. **Dialog (minimal)**
+   - Built‑in lightweight event details panel
+   - No external modal packages; safe fallback if `ha-dialog` unavailable
+
+## Reactive state
+
+- `_config` — merged config with defaults
+- `_weekOffset`, `_weekAnchor` — visible window anchor
+- `_days[]` — per‑day rendered model
+- `_wxByKey` — weather by YYYY‑MM‑DD
+- `_error` — aggregated API failures
+
+## Weather aggregation (hourly → daily)
+
+- Group by date (local)
+- `hi = max(temperature)`; `lo = min(temperature)`
+- `cond = mode(condition/description/state)`
+- `pp = max(precipitation_probability)`
+
+## Namespacing / storage
+
+A `hash()` of the entity list (and key flags) forms a `localStorage` namespace; this prevents clashes between multiple cards with different calendar sets.
+

@@ -1,58 +1,40 @@
-# Development Guide
+# Development
 
-## Requirements
-- Node 18+ and npm
-- Git
-- Home Assistant instance (local or HA Cloud)
+> Baseline: **v0.8.0-dev.12**
 
-## Install
+## Prereqs
+
+- Node 18+
+- PNPM or NPM
+
+## Scripts
+
 ```bash
 npm ci
+npm run lint       # ESLint (no warnings allowed)
+npm run check      # tsc --noEmit
+npm run build      # bundle for HA
 ```
 
-## Build (production)
-```bash
-npm run build
-# Output: dist/multi-calendar-grid-card_lit_<hash>.js
-```
+## Linting rules
 
-## Dev workflow with Home Assistant
-1. Copy the built JS to HA (dev copy recommended):
-   - HA path: `/config/www/dev/multi-calendar-grid-card.dev.js`
-   - Or keep the production copy in `/config/www/multi-calendar-grid-card/multi-calendar-grid-card.js`
-2. In **Settings → Dashboards → Resources**, add (or edit) a resource:
-   - URL: `/local/dev/multi-calendar-grid-card.dev.js`
-   - Type: `JavaScript Module`
-3. Add the card to your dashboard YAML:
-   ```yaml
-   type: custom:multi-calendar-grid-card
-   entities:
-     - entity: calendar.example
-       name: Example
-       color: '#3f51b5'
-   first_day: today
-   slot_min_time: '07:00:00'
-   slot_max_time: '22:00:00'
-   px_per_min: 0.8
-   weather_entity: weather.integra_langsbau_1_3
-   weather_days: 7
-   weather_compact: false
-   ```
-4. Hard-refresh the dashboard (disable cache) after each change.
+- No `console.*` calls left in source
+- Avoid decorators that *return values* (some HA toolchains choke on them)
+- Keep TypeScript strict enough to catch `any` leaks in public APIs
 
-### Weather addon (optional)
-- Add a resource for the addon script (e.g., `/local/dev/mcg-weather-addon.dev.js`).
-- Ensure it loads **after** the card resource.
-- No YAML needed beyond setting `weather_entity` in the card config.
+## Local testing in HA
 
-## Lint & Typecheck
-```bash
-npm run lint
-npm run typecheck
-```
+1. Copy the build to `/config/www/dev/multi-calendar-grid-card-dev12.js`.
+2. Add a **Resource** pointing to `/local/dev/multi-calendar-grid-card-dev12.js` (type `module`).
+3. In a test view, add the card via YAML (see README examples).
+4. Shift+Reload the dashboard after each build (or clear cache).
 
-## Release
-- Update `CHANGELOG.md`.
-- `npm run build`.
-- Attach `dist/multi-calendar-grid-card_lit_<hash>.js` to the GitHub Release.
-- Update README installation snippet if the filename changed.
+## Release hygiene
+
+- Update `CHANGELOG.md`
+- Bump the footer version string in the card if needed
+- Confirm:
+  - initial load shows events
+  - headers are sticky
+  - weather band renders without errors even if service calls fail
+  - no ESLint warnings
