@@ -1,5 +1,6 @@
 # Troubleshooting
 
+> Baseline: **v0.8.0-dev.14**
 > Baseline: **v0.8.0-dev.13**
 
 ## “Unknown card type encountered ‘multi-calendar-grid-card’”
@@ -24,5 +25,5 @@ If you previously hid a calendar in this card, its state is persisted in `localS
 HA tried to use the editor before it was defined. Ensure the editor bundle is included in the same built file (or lazy‑loaded) and that you hard‑reload the editor after updating.
 
 ## Slight misalignment of left time scale vs grid
-Fixed in dev.13. The time column now mirrors the header height with a sticky spacer.
 
+Fixed in dev.14. All-day events overlay the grid, and the time column automatically pads to match the header height.

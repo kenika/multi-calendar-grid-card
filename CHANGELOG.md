@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0-dev.14
+- Overlay all-day events on the grid and remove per-day spacer.
+- Fix all-day events incorrectly showing on the following day.
+
 ## 0.8.0-dev.13
 - Fix misalignment between time scale and calendar grid.
 
