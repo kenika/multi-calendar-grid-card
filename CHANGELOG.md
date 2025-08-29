@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0-dev.14
+- Overlay all-day events on the grid and remove per-day spacer.
+- Fix all-day events incorrectly showing on the following day.
+
+## 0.8.0-dev.13
+- Fix misalignment between time scale and calendar grid.
+
 ## 0.8.0-dev.12
 - Stable UI editor for common options (entities, weather, focus window, height).
 - Robust native weather in headers (HA strategies + aggregation for hourly).
