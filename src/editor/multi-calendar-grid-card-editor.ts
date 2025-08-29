@@ -1,7 +1,7 @@
 /* Multi-Calendar Grid Card – Visual Editor
  * Calendar block layout, max 10, highlight colors with None, capped width
- * Adds global 12/24h time format
- * Version: 0.8.0-dev.9
+ * Adds global 12/24h time format and custom time pickers
+ * Version: 0.8.0-dev.10
  */
 import { LitElement, css, html, nothing } from "lit";
 
@@ -49,8 +49,8 @@ const DEFAULTS = {
   remember_offset: true,
   data_refresh_minutes: 5,
   time_format: "24",
-  today_color: "rgba(33,150,243,.10)",
-  weekend_color: "rgba(0,0,0,.05)",
+  today_color: "#c8e3f9",
+  weekend_color: "#f0f0f0",
   now_line_color: "#e53935",
 } as const;
 
@@ -140,6 +140,64 @@ export class MultiCalendarGridCardEditor extends LitElement {
       return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
     }
     return null;
+  }
+
+  private _parseHHMMSS(s?: string) {
+    if (!s) return { h: 0, m: 0 };
+    const [H,M] = s.split(":");
+    return { h: Number(H)||0, m: Number(M)||0 };
+  }
+
+  private _formatHHMMSS(h: number, m: number) {
+    const hh = String(h).padStart(2,"0");
+    const mm = String(m).padStart(2,"0");
+    return `${hh}:${mm}:00`;
+  }
+
+  private _renderTimePicker(labelTxt: string, key: "slot_min_time" | "slot_max_time", tf: "12" | "24", value: string) {
+    const { h, m } = this._parseHHMMSS(value);
+    const hours = tf === "24" ? Array.from({length:24}, (_,i)=>i) : Array.from({length:12}, (_,i)=>i+1);
+    const mins = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+    const is12 = tf === "12";
+    const curH = is12 ? ((h % 12) || 12) : h;
+    const curP = h >= 12 ? "PM" : "AM";
+
+    const onChange = (ev: any) => {
+      const host = (ev.currentTarget as HTMLElement).closest('.twocol');
+      if (!host) return;
+      const hs = host.querySelector('[data-role="h"]') as HTMLSelectElement | null;
+      const ms = host.querySelector('[data-role="m"]') as HTMLSelectElement | null;
+      const ps = host.querySelector('[data-role="p"]') as HTMLSelectElement | null;
+      if (!hs || !ms) return;
+      let H = Number(hs.value);
+      const M = Number(ms.value);
+      if (is12) {
+        const P = ps?.value || "AM";
+        if (P === "PM" && H < 12) H += 12;
+        if (P === "AM" && H === 12) H = 0;
+      }
+      const hhmmss = this._formatHHMMSS(H, M);
+      this._updateConfig({ [key]: hhmmss } as any);
+      this._syncDerivedPxPerMin();
+    };
+
+    return html`
+      <div class="row two">
+        <label>${labelTxt}</label>
+        <div class="twocol timepick">
+          <select data-role="h" @change=${onChange}>
+            ${hours.map(v => html`<option .selected=${v===curH} .value=${v}>${tf==="24" ? String(v).padStart(2,"0") : v}</option>`)}
+          </select>
+          <span>:</span>
+          <select data-role="m" @change=${onChange}>
+            ${mins.map(v => html`<option .selected=${v===m} .value=${v}>${String(v).padStart(2,"0")}</option>`)}
+          </select>
+          ${is12 ? html`<select data-role="p" @change=${onChange}>
+            ${["AM","PM"].map(v => html`<option .selected=${v===curP} .value=${v}>${v}</option>`)}
+          </select>` : nothing}
+        </div>
+      </div>
+    `;
   }
 
   render() {
@@ -236,21 +294,12 @@ export class MultiCalendarGridCardEditor extends LitElement {
   }
 
   private _gridSection(minTime: string, maxTime: string) {
+    const tf = this._safe(this._config.time_format, DEFAULTS.time_format) as ("12" | "24");
     return html`
       <div class="section">
         <div class="section-title">Default focus</div>
-
-        <div class="row two">
-          <label>Visible time window</label>
-          <div class="twocol">
-            <input type="time" step="60" .value=${minTime}
-              @change=${(ev: any) => { this._updateConfig({ slot_min_time: this._timeToHHMMSS(ev.target.value) }); this._syncDerivedPxPerMin(); }} />
-            <span>to</span>
-            <input type="time" step="60" .value=${maxTime}
-              @change=${(ev: any) => { this._updateConfig({ slot_max_time: this._timeToHHMMSS(ev.target.value) }); this._syncDerivedPxPerMin(); }} />
-          </div>
-        </div>
-
+        ${this._renderTimePicker("Start time", "slot_min_time", tf, this._config.slot_min_time || DEFAULTS.slot_min_time)}
+        ${this._renderTimePicker("End time", "slot_max_time", tf, this._config.slot_max_time || DEFAULTS.slot_max_time)}
         <div class="row">
           <label>Height (vh)</label>
           <input type="number" min="40" max="100" .value=${this._safe(this._config.height_vh, DEFAULTS.height_vh)}
@@ -275,19 +324,6 @@ export class MultiCalendarGridCardEditor extends LitElement {
     `;
   }
 
-  private _highlightsSection() {
-    return html`
-      <div class="section">
-        <div class="section-title">Highlights</div>
-
-        ${this._colorRow("Today highlight", "today_color", this._safe(this._config.today_color, DEFAULTS.today_color))}
-        ${this._colorRow("Weekend highlight", "weekend_color", this._safe(this._config.weekend_color, DEFAULTS.weekend_color))}
-        ${this._colorRow("Now line", "now_line_color", this._safe(this._config.now_line_color, DEFAULTS.now_line_color))}
-        <div class="hint">Set a color, or choose “None” to disable. Hex colors recommended; rgba works in YAML.</div>
-      </div>
-    `;
-  }
-
   private _colorRow(labelTxt: string, key: "today_color" | "weekend_color" | "now_line_color", val: string) {
     const none = (val || "") === "";
     const hex = this._validColorHex(val) || "#2196f3";
@@ -305,6 +341,19 @@ export class MultiCalendarGridCardEditor extends LitElement {
           }}>Pick color</button>
           <input type="color" class="color" .value=${hex} ?disabled=${none} @input=${(ev: any) => this._updateConfig({ [key]: ev.target.value } as any)} />
         </div>
+      </div>
+    `;
+  }
+
+  private _highlightsSection() {
+    return html`
+      <div class="section">
+        <div class="section-title">Highlights</div>
+
+        ${this._colorRow("Today highlight", "today_color", this._safe(this._config.today_color, DEFAULTS.today_color))}
+        ${this._colorRow("Weekend highlight", "weekend_color", this._safe(this._config.weekend_color, DEFAULTS.weekend_color))}
+        ${this._colorRow("Now line", "now_line_color", this._safe(this._config.now_line_color, DEFAULTS.now_line_color))}
+        <div class="hint">Set a color, or choose “None” to disable. Hex colors recommended; rgba works in YAML.</div>
       </div>
     `;
   }
@@ -338,6 +387,8 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
     .row { display: grid; grid-template-columns: 220px 1fr; align-items: center; gap: 12px; margin: 8px 0; }
     .row.two { grid-template-columns: 220px auto; }
+    .timepick { display:flex; align-items:center; gap:8px; }
+    .timepick select { height: 40px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); padding: 0 8px; }
 
     .add-row { display:flex; align-items:center; gap:10px; margin-top: 10px; }
     .add-btn { all: unset; cursor: pointer; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.06); }
@@ -355,7 +406,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
     .del-btn { all: unset; width: 44px; height: 44px; border-radius: 12px; background: rgba(229,57,53,.12); cursor: pointer; display:flex; align-items:center; justify-content:center; font-size: 24px; }
     .del-btn:hover { filter: brightness(0.96); }
 
-    input[type="text"], input[type="number"], input[type="time"] { height: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); color: var(--primary-text-color, #111); }
+    input[type="text"], input[type="number"] { height: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); color: var(--primary-text-color, #111); }
 
     .color-btn { all: unset; cursor: pointer; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); }
     .color-btn.big { width: 140px; }
