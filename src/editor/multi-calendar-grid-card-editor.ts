@@ -1,7 +1,6 @@
 /* Multi-Calendar Grid Card – Visual Editor
- * Calendar block layout, max 10, highlight colors with None, capped width
- * Adds global 12/24h time format and custom time pickers
- * Version: 0.8.0-dev.10
+ * Calendar block layout; highlight colors; 12/24h; time pickers; visible days
+ * Version: 0.8.0-dev.11
  */
 import { LitElement, css, html, nothing } from "lit";
 
@@ -38,6 +37,8 @@ type CardConfig = {
   today_color?: string;
   weekend_color?: string;
   now_line_color?: string;
+
+  visible_days?: number;
 };
 
 const DEFAULTS = {
@@ -52,6 +53,7 @@ const DEFAULTS = {
   today_color: "#c8e3f9",
   weekend_color: "#f0f0f0",
   now_line_color: "#e53935",
+  visible_days: 7,
 } as const;
 
 const MAX_CALENDARS = 10;
@@ -99,14 +101,6 @@ export class MultiCalendarGridCardEditor extends LitElement {
     this._updateConfig({ entities: ents });
   }
 
-  private _timeToHHMMSS(v: string): string {
-    if (!v) return "";
-    const parts = v.split(":");
-    if (parts.length === 2) return `${parts[0].padStart(2,"0")}:${parts[1].padStart(2,"0")}:00`;
-    if (parts.length === 3) return `${parts[0].padStart(2,"0")}:${parts[1].padStart(2,"0")}:${parts[2].padStart(2,"0")}`;
-    return v;
-  }
-
   private _minutesBetween(a: string, b: string) {
     const toMin = (s: string) => {
       const [H,M,S] = s.split(":").map((n) => Number(n));
@@ -127,9 +121,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
     this._updateConfig({ px_per_min: Math.round(pxPerMin * 100) / 100 });
   }
 
-  private _safe<T>(v: T | undefined, d: T) {
-    return v === undefined || v === null ? d : v;
-  }
+  private _safe<T>(v: T | undefined, d: T) { return v === undefined || v === null ? d : v; }
 
   private _validColorHex(c?: string) {
     if (!c) return null;
@@ -202,13 +194,14 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
   render() {
     const ents = this._config.entities || [];
-        const reachedMax = ents.length >= MAX_CALENDARS;
+    const reachedMax = ents.length >= MAX_CALENDARS;
     const tf = this._safe(this._config.time_format, DEFAULTS.time_format);
 
     return html`
       <div class="wrap">
         ${this._calendarsSection(ents, reachedMax)}
         ${this._weatherSection()}
+        ${this._daysRangeSection()}
         ${this._gridSection()}
         ${this._timeFormatSection(tf)}
         ${this._highlightsSection()}
@@ -287,6 +280,21 @@ export class MultiCalendarGridCardEditor extends LitElement {
           ></ha-entity-picker>
         </div>
         <div class="hint">Forecast days and compact options are hidden in UI for now (kept in config).</div>
+      </div>
+    `;
+  }
+
+  private _daysRangeSection() {
+    return html`
+      <div class="section">
+        <div class="section-title">Visible days</div>
+        <div class="row">
+          <label>Number of days</label>
+          <input type="number" min="1" max="14"
+            .value=${this._safe(this._config.visible_days, DEFAULTS.visible_days)}
+            @input=${(ev: any) => this._updateConfig({ visible_days: Math.max(1, Math.min(14, Number(ev.target.value) || 7)) })} />
+        </div>
+        <div class="hint">Choose 1–14 days (default 7).</div>
       </div>
     `;
   }

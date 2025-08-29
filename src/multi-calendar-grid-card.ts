@@ -1,6 +1,6 @@
 /* Multi-Calendar Grid Card
- * Weather headers + rolling 7-day view + highlights + dedup + 12/24h
- * Version: 0.8.0-dev.10
+ * Weather headers + rolling N-day view + highlights + dedup + 12/24h + Outlook-like overlap
+ * Version: 0.8.0-dev.11
  */
 import { LitElement, css, html, nothing } from "lit";
 import "./editor/multi-calendar-grid-card-editor";
@@ -50,6 +50,9 @@ export type MultiCalendarGridCardConfig = {
   today_color?: string;
   weekend_color?: string;
   now_line_color?: string;
+
+  /** RANGE */
+  visible_days?: number; // 1..14, default 7
 };
 
 const DEFAULTS: Required<Pick<
@@ -68,6 +71,7 @@ const DEFAULTS: Required<Pick<
   | "px_per_min"
   | "storage_key"
   | "start_today"
+  | "visible_days"
 >> = {
   slot_min_time: "07:00:00",
   slot_max_time: "22:00:00",
@@ -83,6 +87,7 @@ const DEFAULTS: Required<Pick<
   px_per_min: 1.6,
   storage_key: `${CARD_TAG}.weekOffset`,
   start_today: true,
+  visible_days: 7,
 };
 
 const STRINGS = {
@@ -93,9 +98,9 @@ const STRINGS = {
     no_events: "No events in this range.",
     event_details: "Event details",
     close: "Close",
-    aria_prev_week: "Previous week",
-    aria_next_week: "Next week",
-    aria_today: "Go to current week",
+    aria_prev_week: "Previous period",
+    aria_next_week: "Next period",
+    aria_today: "Go to current period",
     failed_load_prefix: "Failed to load:",
   },
 };
@@ -140,7 +145,7 @@ const isWeekend = (d: Date) => {
 const colorToHex = (raw?: string) => {
   const t = String(raw || "").trim();
   if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t)) return t.toLowerCase();
-  if (/^rgba?\(/.test(t) || /^var\(--/.test(t)) return null; // treat elsewhere
+  if (/^rgba?\(/.test(t) || /^var\(--/.test(t)) return null;
   return "#3366cc";
 };
 const fgOn = (hex: string) => {
@@ -320,6 +325,8 @@ type CalEvent = {
   color: string;
   src: string;
   alsoColors?: string[];
+  allCalendars?: { id: string; name: string; color: string }[];
+  srcName?: string;
   raw: CalEventRaw;
 };
 
@@ -331,11 +338,11 @@ export class MultiCalendarGridCard extends LitElement {
   private _config!: MultiCalendarGridCardConfig;
   private _error: string | null = null;
   private _weekOffset = 0;
-  private _weekAnchor!: Date; // start of visible 7-day window
+  private _weekAnchor!: Date; // start of visible window anchor
   private _days: {
     date: Date;
     allDay: CalEvent[];
-    timed: { n: CalEvent; top: number; height: number; lane: number }[];
+    timed: { n: CalEvent; top: number; height: number; lane: number; cols: number }[];
     laneCount: number;
   }[] = [];
   private _dialogOpen = false;
@@ -379,14 +386,13 @@ export class MultiCalendarGridCard extends LitElement {
     .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; min-width:110px; text-align:center}
     .legend .btn.active{border-color:transparent}
     .legend .name{font-weight:600}
-    .legend .dot{width:10px; height:10px; border-radius:50%}
     .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
     .toolbar button{all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06)}
     .toolbar button:focus{outline:2px solid var(--primary-color)}
     .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
     .empty{color:var(--secondary-text-color); padding:8px 12px; font-size:12px}
     .scroll{height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
-    .grid{position:relative; display:grid; grid-template-columns:70px repeat(7,1fr); gap:1px; background:var(--divider-color,#e0e0e0)}
+    .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0)}
     .col{background:var(--card-background-color,#fff); position:relative}
     .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
     .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
@@ -439,10 +445,10 @@ export class MultiCalendarGridCard extends LitElement {
       ...DEFAULTS,
       start_today: true,
       time_format: "24",
-      // Visual defaults:
       today_color: "#c8e3f9",
       weekend_color: "#f0f0f0",
       now_line_color: "#e53935",
+      visible_days: 7,
     };
   }
 
@@ -464,17 +470,17 @@ export class MultiCalendarGridCard extends LitElement {
     if (!Number.isFinite(sm) || sm <= 0 || sm > 180) {
       throw new Error("slot_minutes must be a number between 1 and 180.");
     }
+    merged.visible_days = clamp(merged.visible_days ?? 7, 1, 14);
 
     this._config = merged;
 
-    // Namespace for localStorage
     const nsKey = JSON.stringify({
       entities: this._config.entities.map((e) => e.entity).sort(),
       start_today: this._config.start_today !== false,
+      visible_days: this._config.visible_days,
     });
     this._nsBase = `${CARD_TAG}.${hash(nsKey)}`;
 
-    // Restore weekOffset
     try {
       this._weekOffset = this._config.remember_offset
         ? Number(localStorage.getItem(`${this._nsBase}.weekOffset`) || "0")
@@ -483,22 +489,17 @@ export class MultiCalendarGridCard extends LitElement {
       this._weekOffset = 0;
     }
 
-    // Compute anchor (today by default)
     this._recomputeAnchor();
-
-    // Kick initial loads immediately
     this._fetchEvents();
     this._loadWeather();
   }
 
-  /** Card size hint */
   getCardSize() {
     const vh = Number(this._config?.height_vh || DEFAULTS.height_vh);
-    const px = Math.max(300, vh * 7);
+    const px = Math.max(300, vh * (this._config.visible_days || 7));
     return Math.ceil(px / 50);
   }
 
-  /** Lifecycle */
   connectedCallback(): void {
     super.connectedCallback();
     this._startTimers();
@@ -518,7 +519,6 @@ export class MultiCalendarGridCard extends LitElement {
     }
   }
 
-  /** Timers */
   private _startTimers() {
     this._stopTimers();
     this._tick = window.setInterval(() => this.requestUpdate(), 60 * 1000);
@@ -535,7 +535,6 @@ export class MultiCalendarGridCard extends LitElement {
     this._refresh = undefined;
   }
 
-  /** Week anchor (7-day window) */
   private _recomputeAnchor() {
     const cfg = this._config!;
     const today = startOfDay(new Date());
@@ -547,7 +546,7 @@ export class MultiCalendarGridCard extends LitElement {
       const first = typeof cfg.first_day === "number" ? cfg.first_day : 1;
       base = startOfWeek(today, first);
     }
-    base.setDate(base.getDate() + this._weekOffset * 7);
+    base.setDate(base.getDate() + this._weekOffset * (cfg.visible_days || 7));
     this._weekAnchor = base;
   }
 
@@ -585,7 +584,6 @@ export class MultiCalendarGridCard extends LitElement {
     } catch {}
   };
 
-  /** Weather */
   private async _loadWeather() {
     const entity = this._config.weather_entity;
     if (!entity || !this.hass) {
@@ -594,7 +592,7 @@ export class MultiCalendarGridCard extends LitElement {
       return;
     }
     this._wxUnit = this.hass.states?.[entity]?.attributes?.temperature_unit || "°";
-    const days = clamp(this._config.weather_days ?? 7, 1, 10);
+    const days = clamp(this._config.weather_days ?? this._config.visible_days ?? 7, 1, 14);
     const fetchId = ++this._lastWeatherFetchId;
     try {
       const { items } = await robustForecast(this.hass, entity, days);
@@ -616,32 +614,26 @@ export class MultiCalendarGridCard extends LitElement {
     }
   }
 
-  /** Calendar data */
   private async _fetchEvents() {
     if (!this.hass) return;
     const myFetch = ++this._lastEventsFetchId;
     this._error = null;
 
     const start = new Date(this._weekAnchor);
-    const end = addMinutes(start, 7 * 24 * 60);
+    const end = addMinutes(start, (this._config.visible_days || 7) * 24 * 60);
     const startIso = start.toISOString();
     const endIso = end.toISOString();
 
     const all: any[] = [];
     const failed: string[] = [];
 
-    // Legend active state
     const activeMapKey = `${this._nsBase}.legend`;
     let activeMap: Record<string, boolean> = {};
-    try {
-      activeMap = JSON.parse(localStorage.getItem(activeMapKey) || "{}") || {};
-    } catch {}
+    try { activeMap = JSON.parse(localStorage.getItem(activeMapKey) || "{}") || {}; } catch {}
 
     for (const ent of this._config.entities) {
-      if (activeMap[ent.entity] === false) continue; // respect legend filter
-      const path = `calendars/${ent.entity}?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(
-        endIso
-      )}`;
+      if (activeMap[ent.entity] === false) continue;
+      const path = `calendars/${ent.entity}?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`;
       try {
         const items = await this.hass.callApi("GET", path);
         if (myFetch !== this._lastEventsFetchId) return;
@@ -658,7 +650,6 @@ export class MultiCalendarGridCard extends LitElement {
       }
     }
 
-    // Deduplicate events across calendars by signature
     const byKey = new Map<string, any[]>();
     const keyOf = (ev: any) => {
       const s0 = ev.start?.dateTime || ev.start?.date || ev.start;
@@ -676,19 +667,28 @@ export class MultiCalendarGridCard extends LitElement {
       else byKey.set(k, [ev]);
     }
 
-    // Map to unique list. Choose primary by earliest position in config entities order.
     const order: Record<string, number> = {};
-    this._config.entities.forEach((e, i) => (order[e.entity] = i));
+    const nameById: Record<string,string> = {};
+    const colorById: Record<string,string> = {};
+    this._config.entities.forEach((e, i) => {
+      order[e.entity] = i;
+      nameById[e.entity] = e.name || e.entity;
+      colorById[e.entity] = e.color || "#3366cc";
+    });
 
     const uniq: any[] = [];
     for (const [, list] of byKey) {
       if (list.length === 1) {
-        uniq.push(list[0]);
+        const only = list[0];
+        only.__srcName = nameById[only.__id] || only.__id;
+        uniq.push(only);
       } else {
         const sorted = list.slice().sort((a, b) => (order[a.__id] ?? 999) - (order[b.__id] ?? 999));
         const primary = sorted[0];
         const rest = sorted.slice(1);
         primary.__alsoColors = rest.map((r: any) => r.__color).filter((c: any) => !!c);
+        primary.__srcName = nameById[primary.__id] || primary.__id;
+        primary.__alsoMeta = rest.map((r: any) => ({ id: r.__id, name: nameById[r.__id] || r.__id, color: colorById[r.__id] || r.__color }));
         uniq.push(primary);
       }
     }
@@ -696,15 +696,16 @@ export class MultiCalendarGridCard extends LitElement {
     const days: {
       date: Date;
       allDay: CalEvent[];
-      timed: { n: CalEvent; top: number; height: number; lane: number }[];
+      timed: { n: CalEvent; top: number; height: number; lane: number; cols: number }[];
       laneCount: number;
     }[] = [];
 
-    for (let d = 0; d < 7; d++) {
+    for (let d = 0; d < (this._config.visible_days || 7); d++) {
       const dayStart = addMinutes(start, d * 24 * 60);
       const dayEnd = addMinutes(dayStart, 24 * 60);
       const alls: CalEvent[] = [];
-      const timed: { n: CalEvent; top: number; height: number; lane: number }[] = [];
+      type TTimed = { n: CalEvent; start: number; end: number; top: number; height: number; lane: number; cols: number };
+      const rawList: TTimed[] = [];
 
       for (const raw of uniq) {
         const n = this._normalizeEvent(raw, raw.__id);
@@ -712,34 +713,53 @@ export class MultiCalendarGridCard extends LitElement {
           if (n.allDay) {
             if (this._config.show_all_day) alls.push(n);
           } else {
-            const top = Math.max(0, (n.s.getTime() - dayStart.getTime()) / 60000);
-            const bottom = Math.max(0, (n.e.getTime() - dayStart.getTime()) / 60000);
-            const t = Math.max(0, top);
-            const h = Math.max(1, Math.min(1440, Math.max(t + 1, bottom)) - t);
-            timed.push({ n, top: t, height: h, lane: 0 });
+            const startMin = Math.max(0, (n.s.getTime() - dayStart.getTime()) / 60000);
+            const endMin = Math.max(0, (n.e.getTime() - dayStart.getTime()) / 60000);
+            const t = Math.max(0, startMin);
+            const h = Math.max(1, Math.min(1440, Math.max(t + 1, endMin)) - t);
+            rawList.push({ n, start: t, end: t + h, top: t, height: h, lane: 0, cols: 1 });
           }
         }
       }
 
-      timed.sort((a, b) => a.top - b.top || b.height - a.height);
-      const laneEnd: number[] = [];
-      for (const ev of timed) {
-        let placed = false;
-        for (let i = 0; i < laneEnd.length; i++) {
-          if (ev.top >= laneEnd[i]) {
-            laneEnd[i] = ev.top + ev.height;
-            ev.lane = i;
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) {
-          laneEnd.push(ev.top + ev.height);
-          ev.lane = laneEnd.length - 1;
-        }
-      }
+      rawList.sort((a, b) => a.start - b.start || b.height - a.height);
 
-      days.push({ date: dayStart, allDay: alls, timed, laneCount: Math.max(1, laneEnd.length) });
+      const groups: { members: TTimed[]; maxCols: number }[] = [];
+      let active: TTimed[] = [];
+      let curGroup: { members: TTimed[]; used: boolean[]; maxCols: number } | null = null;
+
+      const flushGroup = () => {
+        if (curGroup) {
+          const mcols = Math.max(curGroup.maxCols, 1);
+          curGroup.members.forEach(m => (m.cols = mcols));
+          groups.push({ members: curGroup.members, maxCols: mcols });
+          curGroup = null;
+          active = [];
+        }
+      };
+
+      for (const ev of rawList) {
+        active = active.filter(a => a.end > ev.start);
+        if (!curGroup || active.length === 0) {
+          flushGroup();
+          curGroup = { members: [], used: [], maxCols: 0 };
+        }
+        let col = 0;
+        for (let i = 0; i < (curGroup.used.length || 0); i++) {
+          if (!curGroup.used[i]) { col = i; break; }
+          col = i + 1;
+        }
+        curGroup.used[col] = true;
+        ev.lane = col;
+        active.push(ev);
+        curGroup.members.push(ev);
+        curGroup.maxCols = Math.max(curGroup.maxCols, active.length);
+      }
+      flushGroup();
+
+      const timed = groups.flatMap(g => g.members);
+      const laneCount = Math.max(1, ...groups.map(g => g.maxCols));
+      days.push({ date: dayStart, allDay: alls, timed, laneCount });
     }
 
     if (myFetch === this._lastEventsFetchId) {
@@ -770,10 +790,13 @@ export class MultiCalendarGridCard extends LitElement {
       src,
       alsoColors: Array.isArray((ev as any).__alsoColors) ? (ev as any).__alsoColors : [],
       raw: ev,
+      ...(ev.__srcName ? { srcName: ev.__srcName } : {} as any),
+      ...(ev.__alsoMeta
+        ? { allCalendars: [{ id: src, name: (ev.__srcName || src), color: (ev.__color || "#3366cc") }, ...(ev.__alsoMeta as any[])] }
+        : { allCalendars: [{ id: src, name: (ev.__srcName || src), color: (ev.__color || "#3366cc") }] }),
     };
   }
 
-  /** Actions */
   private _shiftWeek(delta: number, resetToToday = false) {
     this._weekOffset = resetToToday ? 0 : this._weekOffset + delta;
     this._saveOffset();
@@ -783,7 +806,6 @@ export class MultiCalendarGridCard extends LitElement {
     this.updateComplete.then(() => this._restoreScroll());
   }
 
-  /** Render helpers */
   private _lang() {
     const l = this?.hass?.locale;
     return this._config.locale || l?.language || "en";
@@ -809,14 +831,12 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _resolveColor(val?: string, fallbackWhenTruthy?: boolean, fallback?: string) {
     if (typeof val === "string") return val; // '' allowed (means none)
-    // Back-compat booleans (not in editor UI anymore)
     return fallbackWhenTruthy ? (fallback || "") : "";
   }
 
-  /** Template */
   render() {
     const start = this._weekAnchor;
-    const end = addMinutes(new Date(start), 7 * 24 * 60 - 1);
+    const end = addMinutes(new Date(start), (this._config.visible_days || 7) * 24 * 60 - 1);
     const lang = this._lang();
     const rf = new Intl.DateTimeFormat(lang, { day: "2-digit", month: "short" });
     const vh = Number(this._config.height_vh || DEFAULTS.height_vh);
@@ -850,7 +870,7 @@ export class MultiCalendarGridCard extends LitElement {
         ${this._anyEvents() ? nothing : html`<div class="empty">${tr(lang, "no_events")}</div>`}
 
         <div class="scroll" style=${`--mcg-height:${vh}vh`} @scroll=${this._persistScroll}>
-          <div class="grid">
+          <div class="grid" style=${`grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr)`}>
             ${this._timeColumn()}
             ${this._dayColumns(start)}
           </div>
@@ -865,16 +885,12 @@ export class MultiCalendarGridCard extends LitElement {
   private _legendItem(e: EntityCfg) {
     const activeMapKey = `${this._nsBase}.legend`;
     let activeMap: Record<string, boolean> = {};
-    try {
-      activeMap = JSON.parse(localStorage.getItem(activeMapKey) || "{}") || {};
-    } catch {}
+    try { activeMap = JSON.parse(localStorage.getItem(activeMapKey) || "{}") || {}; } catch {}
     const active = activeMap[e.entity] !== false;
 
     const toggle = () => {
       const next = { ...activeMap, [e.entity]: !active };
-      try {
-        localStorage.setItem(activeMapKey, JSON.stringify(next));
-      } catch {}
+      try { localStorage.setItem(activeMapKey, JSON.stringify(next)); } catch {}
       this._fetchEvents();
       this.requestUpdate();
     };
@@ -882,10 +898,9 @@ export class MultiCalendarGridCard extends LitElement {
     const hex = colorToHex(e.color || "#3366cc") || "#3366cc";
     const fg = fgOn(hex);
     const styleActive = `background:${hex}; color:${fg}; border-color:transparent`;
-    const styleInactive = `background:${rgba(hex,0.12)}; border:1px solid ${hex}; color:var(--primary-text-color,#111)`;
+    const styleInactive = `background:${rgba(hex,0.12)}; border:1px solid ${hex}; color:var(--secondary-text-color,#555)`;
 
     return html`<button class="btn ${active ? "active" : ""}" style=${active ? styleActive : styleInactive} @click=${toggle}>
-      <span class="dot" style=${`background:${hex}`}></span>
       <span class="name">${e.name || e.entity}</span>
     </button>`;
   }
@@ -915,20 +930,10 @@ export class MultiCalendarGridCard extends LitElement {
     const columnHeight = Math.round(1440 * pxPerMin);
     const today = startOfDay(new Date());
 
-    // Resolve highlight colors (strings; '' means none). If both apply (today on weekend),
-    // today color takes precedence.
-    const todayColor = this._resolveColor(
-      this._config.today_color,
-      (this as any)._config?.highlight_today !== false,
-      "#c8e3f9"
-    );
-    const weekendColor = this._resolveColor(
-      this._config.weekend_color,
-      (this as any)._config?.highlight_weekends !== false,
-      "#f0f0f0"
-    );
+    const todayColor = this._resolveColor(this._config.today_color, true, "#c8e3f9");
+    const weekendColor = this._resolveColor(this._config.weekend_color, true, "#f0f0f0");
 
-    for (let d = 0; d < 7; d++) {
+    for (let d = 0; d < (this._config.visible_days || 7); d++) {
       const date = addMinutes(start, d * 24 * 60);
       const isToday = sameYMD(date, today);
       const isWknd = isWeekend(date);
@@ -938,13 +943,8 @@ export class MultiCalendarGridCard extends LitElement {
 
       let headerBg = "";
       let bodyBg = "";
-      if (isToday && todayColor) {
-        headerBg = todayColor;
-        bodyBg = todayColor;
-      } else if (isWknd && weekendColor) {
-        headerBg = weekendColor;
-        bodyBg = weekendColor;
-      }
+      if (isToday && todayColor) { headerBg = todayColor; bodyBg = todayColor; }
+      else if (isWknd && weekendColor) { headerBg = weekendColor; bodyBg = weekendColor; }
 
       const allDay = this._config.show_all_day
         ? html`<div class="allday">
@@ -956,16 +956,15 @@ export class MultiCalendarGridCard extends LitElement {
           </div>`
         : nothing;
 
-      const laneCount = day?.laneCount || 1;
       const timed = (day?.timed || []).map((ev) => {
         const top = Math.round(ev.top * pxPerMin);
         const height = Math.max(2, Math.round(ev.height * pxPerMin));
-        const share = 100 / laneCount;
-        const left = ev.lane * share;
+        const share = 100 / Math.max(1, ev.cols || day?.laneCount || 1);
+        const left = (ev.lane || 0) * share;
 
         const hex = colorToHex(ev.n.color || "#3366cc") || "#3366cc";
         const fg = fgOn(hex);
-        const bg = rgba(hex, 0.55);
+        const bg = hex; // opaque so grid lines never show through
 
         return html`<div
           class="event"
@@ -979,10 +978,8 @@ export class MultiCalendarGridCard extends LitElement {
       });
 
       const nowLine = this._nowLineForDay(d);
-
       const wx = this._renderWeatherBand(date);
 
-      // Background grid lines: minor at slot_minutes, major at 60min
       const minor = Math.round((Number(this._config.slot_minutes) || 30) * (Number(this._config.px_per_min) || 1.6));
       const major = Math.round(60 * (Number(this._config.px_per_min) || 1.6));
       const bgImage = `repeating-linear-gradient(to bottom, rgba(0,0,0,.08) 0, rgba(0,0,0,.08) 1px, transparent 1px, transparent ${minor}px),
@@ -1000,7 +997,7 @@ export class MultiCalendarGridCard extends LitElement {
       `);
     }
 
-    out.unshift(html`<style>.grid{height:${columnHeight}px}</style>`);
+    out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr); height:${columnHeight}px}</style>`);
     return out;
   }
 
@@ -1024,7 +1021,6 @@ export class MultiCalendarGridCard extends LitElement {
   }
 
   private _nowLineForDay(dayIndex: number) {
-    // Combine legacy boolean + new color key
     const colorRaw = (this._config.now_line_color ?? "#e53935");
     const showLegacy = this._config.show_now_indicator !== false;
     const color = typeof colorRaw === "string" ? colorRaw : "#e53935";
@@ -1054,6 +1050,11 @@ export class MultiCalendarGridCard extends LitElement {
   private _renderDialog() {
     if (!this._dialogOpen || !this._dialogEvent) return nothing;
     const ev = this._dialogEvent;
+
+    const chips = ev.allCalendars && ev.allCalendars.length ? html`<div style="display:flex; gap:6px; justify-content:flex-end; margin-bottom:8px;">
+      ${ev.allCalendars.map(c => html`<span style=${`padding:4px 8px; border-radius:999px; background:${c.color}; color:${fgOn(colorToHex(c.color)||'#3366cc')}; font-size:12px;`}>${c.name}</span>`)}
+    </div>` : nothing;
+
     const body = html`
       <div class="row"><strong>${ev.summary}</strong></div>
       <div class="row">${this._fmtRange(ev.s, ev.e, ev.allDay)}</div>
@@ -1064,7 +1065,7 @@ export class MultiCalendarGridCard extends LitElement {
     if ((customElements as any).get("ha-dialog")) {
       return html`<ha-dialog .open=${this._dialogOpen} @closed=${() => this._closeDialog()}>
         <div slot="heading">${tr(this._lang(), "event_details")}</div>
-        ${body}
+        ${chips}${body}
         <mwc-button slot="primaryAction" dialogAction="close">${tr(this._lang(), "close")}</mwc-button>
       </ha-dialog>`;
     }
@@ -1072,7 +1073,7 @@ export class MultiCalendarGridCard extends LitElement {
     return html`<div class="overlay" @click=${(e: Event) => (e.target === e.currentTarget ? this._closeDialog() : null)}>
       <div class="modal" role="dialog" aria-modal="true" aria-label="${tr(this._lang(), "event_details")}">
         <h3>${tr(this._lang(), "event_details")}</h3>
-        ${body}
+        ${chips}${body}
         <div class="actions">
           <button class="btn" @click=${() => this._closeDialog()}>${tr(this._lang(), "close")}</button>
         </div>
@@ -1080,7 +1081,6 @@ export class MultiCalendarGridCard extends LitElement {
     </div>`;
   }
 
-  /** Misc */
   private _anyEvents() {
     return (this._days || []).some((d) => (d.allDay?.length || 0) + (d.timed?.length || 0) > 0);
   }
@@ -1092,17 +1092,12 @@ function hash(s: string): string {
   for (let i = 0; i < s.length; i++) t = (t * 33) ^ s.charCodeAt(i);
   return (t >>> 0).toString(36);
 }
-
 function stripMarkup(s?: string): string {
   if (!s) return "";
   let t = String(s);
-  // Remove HTML tags
   t = t.replace(/<[^>]*>/g, "");
-  // Decode a few common HTML entities
   t = t.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
-  // Strip simple Markdown decorations
   t = t.replace(/\*\*|__|\*|_|~~|`+/g, "");
-  // Convert markdown links [text](url) -> text
   t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
   return t.trim();
 }
@@ -1114,7 +1109,7 @@ if (!(window as any).customCards.find((c: any) => c.type === CARD_TAG)) {
   (window as any).customCards.push({
     type: CARD_TAG,
     name: "Multi-Calendar Grid Card",
-    description: "7-day time-grid overlay for multiple calendar entities (Lit+TS)",
+    description: "N-day time-grid overlay for multiple calendar entities (Lit+TS)",
     preview: false,
   });
 }
