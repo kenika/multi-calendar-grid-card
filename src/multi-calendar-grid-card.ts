@@ -1,5 +1,5 @@
 /* Multi-Calendar Grid Card
- * v0.8.0-dev.12 — Tick alignment, DOM grid lines, midnight-to-midnight, dialog chips, dedup, 12/24h
+ * v0.8.0-dev.13 — Align time scale with headers; remove date badge; fixed-width legend buttons
  */
 import { LitElement, css, html, nothing } from "lit";
 import "./editor/multi-calendar-grid-card-editor";
@@ -50,6 +50,9 @@ export type MultiCalendarGridCardConfig = {
   weekend_color?: string;
   now_line_color?: string;
 
+  /** LEGEND */
+  legend_button_ch?: number;
+
   /** RANGE */
   visible_days?: number; // 1..14, default 7
 };
@@ -71,6 +74,7 @@ const DEFAULTS: Required<Pick<
   | "storage_key"
   | "start_today"
   | "visible_days"
+  | "legend_button_ch"
 >> = {
   slot_min_time: "07:00:00",
   slot_max_time: "22:00:00",
@@ -87,6 +91,7 @@ const DEFAULTS: Required<Pick<
   storage_key: `${CARD_TAG}.weekOffset`,
   start_today: true,
   visible_days: 7,
+  legend_button_ch: 15,
 };
 
 const STRINGS = {
@@ -358,6 +363,7 @@ export class MultiCalendarGridCard extends LitElement {
   private _tick?: number;
   private _refresh?: number;
   private _nsBase = "";
+  private _headerOffsetPx: number = 0;
 
   /** Reactive properties (no decorators) */
   static properties = {
@@ -380,10 +386,9 @@ export class MultiCalendarGridCard extends LitElement {
     .hdr{display:flex; justify-content:space-between; align-items:center; gap:14px; margin:12px}
     /* LEGEND as full-color buttons */
     .legend{display:flex; gap:8px; flex-wrap:wrap; font-size:14px}
-    .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; min-width:110px; text-align:center}
+    .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; width: var(--legend-width, 15ch); text-align:center}
     .legend .btn.active{border-color:transparent}
     .legend .name{font-weight:600}
-    .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
     .toolbar button{all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06)}
     .toolbar button:focus{outline:2px solid var(--primary-color)}
     .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
@@ -440,6 +445,7 @@ export class MultiCalendarGridCard extends LitElement {
       weekend_color: "#f0f0f0",
       now_line_color: "#e53935",
       visible_days: 7,
+      legend_button_ch: 15,
     };
   }
 
@@ -506,7 +512,7 @@ export class MultiCalendarGridCard extends LitElement {
     if (changed.has("_config") || changed.has("_weekAnchor")) {
       this._fetchEvents();
       this._loadWeather();
-      this.updateComplete.then(() => this._restoreScroll());
+      this.updateComplete.then(() => { this._measureHeader(); this._restoreScroll(); });
     }
   }
 
@@ -574,6 +580,12 @@ export class MultiCalendarGridCard extends LitElement {
       localStorage.setItem(`${this._nsBase}.scrollTop`, String(sc.scrollTop));
     } catch {}
   };
+
+  private _measureHeader() {
+    // measure the first day header height to align the left time scale
+    const hdr = this.renderRoot?.querySelector('.col .dayhdr') as HTMLElement | null;
+    this._headerOffsetPx = hdr?.offsetHeight || 0;
+  }
 
   private async _loadWeather() {
     const entity = this._config.weather_entity;
@@ -822,19 +834,14 @@ export class MultiCalendarGridCard extends LitElement {
 
   render() {
     const start = this._weekAnchor;
-    const end = addMinutes(new Date(start), (this._config.visible_days || 7) * 24 * 60 - 1);
     const lang = this._lang();
-    const rf = new Intl.DateTimeFormat(lang, { day: "2-digit", month: "short" });
     const vh = Number(this._config.height_vh || DEFAULTS.height_vh);
 
     return html`
-      <ha-card>
+      <ha-card style=${`--legend-width:${(this._config.legend_button_ch || 15)}ch`}>
         <div class="hdr">
           <div class="legend">
             ${this._config.entities.map((e) => this._legendItem(e))}
-          </div>
-          <div class="badge" title="${this._error ? this._error : ""}">
-            ${rf.format(start)} – ${rf.format(end)}
           </div>
           <div class="toolbar">
             <button type="button" aria-label="${tr(lang, "aria_prev_week")}" @click=${() => this._shiftWeek(-1)}>${tr(
@@ -900,14 +907,19 @@ export class MultiCalendarGridCard extends LitElement {
     const tf = new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit", hour12: use12 });
     for (let m = 0; m <= 1440; m += step) {
       const top = Math.round(m * pxPerMin);
-      ticks.push(html`<div class=${m % 60 === 0 ? "tick" : "tick minor"} style=${`top:${top}px`}></div>`);
-      if (m % 60 === 0) {
+      const major = m % 60 === 0;
+      ticks.push(html`<div class=${major ? "tick" : "tick minor"} style=${`top:${top}px`}></div>`);
+      if (major) {
         const ref = new Date(1970, 0, 1, Math.floor(m / 60), 0, 0, 0);
         const label = tf.format(ref);
         ticks.push(html`<div class="hour-label" style=${`top:${top - 8}px`}>${label}</div>`);
       }
     }
-    return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative">${ticks}</div>`;
+    const columnHeight = Math.round(1440 * pxPerMin);
+    return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative">
+      <div style=${`height:${this._headerOffsetPx}px;`}></div>
+      <div class="time-body" style=${`height:${columnHeight}px; position:relative`}>${ticks}</div>
+    </div>`;
   }
 
   private _gridLinesDom(pxPerMin: number, stepMin: number) {
@@ -990,7 +1002,7 @@ export class MultiCalendarGridCard extends LitElement {
       `);
     }
 
-    out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr); height:${columnHeight}px}</style>`);
+    out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr)}</style>`);
     return out;
   }
 
@@ -1091,7 +1103,7 @@ function stripMarkup(s?: string): string {
   t = t.replace(/<[^>]*>/g, "");
   t = t.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
   t = t.replace(/\*\*|__|\*|_|~~|`+/g, "");
-  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+  t = t.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   return t.trim();
 }
 

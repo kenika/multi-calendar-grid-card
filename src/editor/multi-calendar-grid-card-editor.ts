@@ -1,5 +1,5 @@
 /* Multi-Calendar Grid Card – Visual Editor
- * v0.8.0-dev.12 — compact hints; calendar blocks; visible days; time pickers; 12/24h
+ * v0.8.0-dev.13 — add legend width control; same 12/24h time pickers
  */
 import { LitElement, css, html, nothing } from "lit";
 
@@ -38,6 +38,7 @@ type CardConfig = {
   now_line_color?: string;
 
   visible_days?: number;
+  legend_button_ch?: number;
 };
 
 const DEFAULTS = {
@@ -53,6 +54,7 @@ const DEFAULTS = {
   weekend_color: "#f0f0f0",
   now_line_color: "#e53935",
   visible_days: 7,
+  legend_button_ch: 15,
 } as const;
 
 const MAX_CALENDARS = 10;
@@ -219,6 +221,13 @@ export class MultiCalendarGridCardEditor extends LitElement {
         <div class="add-row">
           <button class="add-btn" ?disabled=${reachedMax} @click=${this._addEntity}>＋ Add calendar</button>
           ${reachedMax ? html`<span class="hint">Max ${MAX_CALENDARS} calendars</span>` : nothing}
+        </div>
+
+        <div class="row">
+          <label>Legend button width (ch)</label>
+          <input type="number" min="8" max="28"
+            .value=${this._safe(this._config.legend_button_ch, DEFAULTS.legend_button_ch)}
+            @input=${(ev: any) => this._updateConfig({ legend_button_ch: Math.max(8, Math.min(28, Number(ev.target.value) || DEFAULTS.legend_button_ch)) })} />
         </div>
       </div>
     `;
