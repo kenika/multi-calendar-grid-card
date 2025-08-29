@@ -1,9 +1,7 @@
-/* Minimal editor for Multi-Calendar Grid Card
- * v0.8.0-dev.15 — provides setConfig() so Visual Editor doesn't error,
- * and a few basic fields. More advanced UI can be added later.
+/* Multi-Calendar Grid Card — Editor
+ * v0.8.0-dev.15a — remove Lit decorators to satisfy TS/ESLint config (no decorators)
  */
 import { LitElement, css, html, nothing } from "lit";
-import { property, state } from "lit/decorators.js";
 
 type EntityCfg = { entity: string; name?: string; color?: string };
 type CardConfig = {
@@ -23,18 +21,25 @@ type CardConfig = {
 };
 
 export class MultiCalendarGridCardEditor extends LitElement {
-  @property({ attribute: false }) public hass: any;
-  @state() private _config!: CardConfig;
+  // Reactive fields without decorators
+  hass: any;
+  private _config!: CardConfig;
+
+  static properties = {
+    hass: { attribute: false },
+    _config: { attribute: false, state: true },
+  };
 
   static styles = css`
     .row{ display:grid; grid-template-columns: 180px 1fr; gap:12px; align-items:center; margin:8px 0 }
     .two{ display:grid; grid-template-columns: 1fr 1fr; gap:12px }
-    ha-textfield, ha-select { width: 100% }
+    input[type="time"], input[type="number"], input[type="text"], select { width: 100% }
     .hint{ color: var(--secondary-text-color); font-size: 12px }
   `;
 
   setConfig(config: CardConfig): void {
     this._config = { ...config };
+    this.requestUpdate();
   }
 
   private _emitConfig() {
@@ -42,33 +47,37 @@ export class MultiCalendarGridCardEditor extends LitElement {
   }
 
   private _onTimeChange(key: "slot_min_time" | "slot_max_time", e: Event) {
-    const v = (e.target as HTMLInputElement)?.value || "";
-    // Ensure HH:MM:SS
-    const value = v.length === 5 ? `${v}:00` : v;
+    const inp = e.target as HTMLInputElement | null;
+    const v = inp?.value || "";
+    const value = v.length === 5 ? `${v}:00` : v; // normalize to HH:MM:SS
     this._config = { ...this._config, [key]: value };
     this._emitConfig();
   }
 
   private _onNumber(key: keyof CardConfig, e: Event) {
-    const v = Number((e.target as HTMLInputElement)?.value || "0");
+    const inp = e.target as HTMLInputElement | null;
+    const v = Number(inp?.value || "0");
     this._config = { ...this._config, [key]: v };
     this._emitConfig();
   }
 
   private _onSelect(key: keyof CardConfig, e: Event) {
-    const v = (e.target as HTMLSelectElement)?.value as any;
+    const sel = e.target as HTMLSelectElement | null;
+    const v = (sel?.value as any);
     this._config = { ...this._config, [key]: v };
     this._emitConfig();
   }
 
   private _onColor(key: keyof CardConfig, e: Event) {
-    const v = (e.target as HTMLInputElement)?.value || "";
+    const inp = e.target as HTMLInputElement | null;
+    const v = inp?.value || "";
     this._config = { ...this._config, [key]: v };
     this._emitConfig();
   }
 
   private _onBool(key: keyof CardConfig, e: Event) {
-    const v = (e.target as HTMLInputElement)?.checked || false;
+    const inp = e.target as HTMLInputElement | null;
+    const v = !!inp?.checked;
     this._config = { ...this._config, [key]: v as any };
     this._emitConfig();
   }
@@ -134,4 +143,6 @@ export class MultiCalendarGridCardEditor extends LitElement {
   }
 }
 
-customElements.define("multi-calendar-grid-card-editor", MultiCalendarGridCardEditor);
+if (!customElements.get("multi-calendar-grid-card-editor")) {
+  customElements.define("multi-calendar-grid-card-editor", MultiCalendarGridCardEditor);
+}
