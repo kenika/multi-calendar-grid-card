@@ -1,6 +1,11 @@
-/* Multi-Calendar Grid Card — Editor
- * v0.8.0-dev.15a — remove Lit decorators to satisfy TS/ESLint config (no decorators)
+/* Multi-Calendar Grid Card — Rich Editor (no decorators)
+ * v0.8.0-dev.16
+ * - Restores full-featured editor with entities manager (max 10), weather picker,
+ *   focus window, visible days (1..14), time format, legend width, highlight colors,
+ *   remember offset, dialog width.
+ * - Uses no Lit decorators to satisfy strict TS/ESLint config.
  */
+
 import { LitElement, css, html, nothing } from "lit";
 
 type EntityCfg = { entity: string; name?: string; color?: string };
@@ -20,6 +25,9 @@ type CardConfig = {
   dialog_width_px?: number;
 };
 
+const MAX_CALENDARS = 10;
+const DEFAULT_COLOR_PALETTE = ["#3f51b5","#9c27b0","#03a9f4","#009688","#ff9800","#e91e63","#8bc34a","#607d8b","#795548","#2196f3"];
+
 export class MultiCalendarGridCardEditor extends LitElement {
   // Reactive fields without decorators
   hass: any;
@@ -31,14 +39,30 @@ export class MultiCalendarGridCardEditor extends LitElement {
   };
 
   static styles = css`
-    .row{ display:grid; grid-template-columns: 180px 1fr; gap:12px; align-items:center; margin:8px 0 }
-    .two{ display:grid; grid-template-columns: 1fr 1fr; gap:12px }
-    input[type="time"], input[type="number"], input[type="text"], select { width: 100% }
-    .hint{ color: var(--secondary-text-color); font-size: 12px }
+    :host { display:block; }
+    .wrap { max-width: 720px; padding: 8px 4px 16px; box-sizing: border-box; }
+    .section { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 12px; padding: 12px; margin: 10px 0; background: var(--card-background-color); }
+    .section h3 { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
+    .row { display: grid; grid-template-columns: 180px 1fr; gap: 12px; align-items: center; margin: 8px 0; }
+    .row > label { color: var(--secondary-text-color); }
+    .two { display:grid; grid-template-columns: 1fr 1fr; gap:12px }
+    input[type="time"], input[type="number"], input[type="text"], input[type="color"], select { width: 100% }
+    .hint { color: var(--secondary-text-color); font-size: 12px }
+    .cal-list { display: flex; flex-direction: column; gap: 10px; }
+    .cal-item { border: 1px solid var(--divider-color,#e0e0e0); border-radius: 10px; padding: 10px; position: relative; }
+    .cal-head { font-weight: 700; margin-bottom: 8px; display:flex; justify-content: space-between; align-items: center; }
+    .cal-grid { display:grid; grid-template-columns: 1fr 120px; gap: 10px; align-items: center; }
+    .cal-subgrid { display:grid; grid-template-columns: 1fr 120px; gap: 10px; align-items: center; }
+    .remove { all: unset; cursor: pointer; border-radius: 8px; padding: 6px 10px; background: rgba(0,0,0,.06); }
+    .add { all: unset; cursor: pointer; border-radius: 999px; padding: 8px 12px; background: rgba(0,0,0,.08); display:inline-flex; align-items:center; gap:8px; }
+    .cols-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .chip { display:inline-block; border-radius: 999px; padding: 4px 8px; font-size: 12px; border: 1px solid var(--divider-color,#e0e0e0); }
   `;
 
   setConfig(config: CardConfig): void {
+    // Ensure defaults
     this._config = { ...config };
+    if (!Array.isArray(this._config.entities)) this._config.entities = [];
     this.requestUpdate();
   }
 
@@ -82,62 +106,180 @@ export class MultiCalendarGridCardEditor extends LitElement {
     this._emitConfig();
   }
 
+  private _onCalendarEntity(i: number, ev: Event) {
+    const detailVal = (ev as any).detail?.value;
+    const value = detailVal != null ? detailVal : (ev.target as any)?.value;
+    const list = [...this._config.entities];
+    const prev = list[i] || { entity: "" };
+    const next = { ...prev, entity: value || "" };
+    if (!next.name) {
+      const st = (this as any).hass?.states?.[value];
+      if (st?.attributes?.friendly_name) next.name = st.attributes.friendly_name;
+    }
+    list[i] = next;
+    this._config = { ...this._config, entities: list };
+    this._emitConfig();
+  }
+
+  private _onCalendarName(i: number, e: Event) {
+    const v = (e.target as HTMLInputElement | null)?.value || "";
+    const list = [...this._config.entities];
+    const prev = list[i] || { entity: "" };
+    list[i] = { ...prev, name: v };
+    this._config = { ...this._config, entities: list };
+    this._emitConfig();
+  }
+
+  private _onCalendarColor(i: number, e: Event) {
+    const v = (e.target as HTMLInputElement | null)?.value || "";
+    const list = [...this._config.entities];
+    const prev = list[i] || { entity: "" };
+    list[i] = { ...prev, color: v };
+    this._config = { ...this._config, entities: list };
+    this._emitConfig();
+  }
+
+  private _removeCalendar(i: number) {
+    const list = [...this._config.entities];
+    list.splice(i, 1);
+    this._config = { ...this._config, entities: list };
+    this._emitConfig();
+  }
+
+  private _addCalendar() {
+    const list = [...(this._config.entities || [])];
+    if (list.length >= MAX_CALENDARS) return;
+    const color = DEFAULT_COLOR_PALETTE[list.length % DEFAULT_COLOR_PALETTE.length];
+    list.push({ entity: "", name: "", color });
+    this._config = { ...this._config, entities: list };
+    this._emitConfig();
+  }
+
+  private _onWeatherEntity(ev: Event) {
+    const detailVal = (ev as any).detail?.value;
+    const value = detailVal != null ? detailVal : (ev.target as any)?.value;
+    this._config = { ...this._config, weather_entity: value || "" };
+    this._emitConfig();
+  }
+
+  private _calendarItem(i: number, cfg: EntityCfg) {
+    const name = cfg.name || cfg.entity || `Calendar ${i+1}`;
+    return html`
+      <div class="cal-item">
+        <div class="cal-head">
+          <div>${name}</div>
+          <button class="remove" @click=${() => this._removeCalendar(i)}>- Remove</button>
+        </div>
+        <div class="cal-grid">
+          <div>
+            <ha-entity-picker
+              .hass=${(this as any).hass}
+              .value=${cfg.entity || ""}
+              .includeDomains=${["calendar"]}
+              allow-custom-entity
+              @value-changed=${(e: Event) => this._onCalendarEntity(i, e)}
+            ></ha-entity-picker>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="chip">Color</span>
+            <input type="color" .value=${cfg.color || DEFAULT_COLOR_PALETTE[i % DEFAULT_COLOR_PALETTE.length]} @input=${(e: Event) => this._onCalendarColor(i, e)} />
+          </div>
+        </div>
+        <div class="cal-subgrid" style="margin-top:8px">
+          <input type="text" placeholder="Display name" .value=${cfg.name || ""} @input=${(e: Event) => this._onCalendarName(i, e)} />
+          <div></div>
+        </div>
+      </div>
+    `;
+  }
+
   render() {
     if (!this._config) return nothing;
     const cfg = this._config;
+    const ents = Array.isArray(cfg.entities) ? cfg.entities : [];
+
     return html`
-      <div class="row">
-        <div>Entities</div>
-        <div class="hint">Manage calendars in YAML for now.</div>
-      </div>
-
-      <div class="row">
-        <div>Time format</div>
-        <select @change=${(e: Event) => this._onSelect("time_format", e)}>
-          <option value="24" ?selected=${cfg.time_format !== "12"}>24-hour</option>
-          <option value="12" ?selected=${cfg.time_format === "12"}>12-hour</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <div>Visible days</div>
-        <input type="number" min="1" max="14" .value=${String(cfg.visible_days ?? 7)} @change=${(e: Event) => this._onNumber("visible_days", e)} />
-      </div>
-
-      <div class="row">
-        <div>Focus window</div>
-        <div class="two">
-          <input type="time" step="60" .value=${(cfg.slot_min_time || "07:00:00").slice(0,5)} @change=${(e: Event) => this._onTimeChange("slot_min_time", e)} />
-          <input type="time" step="60" .value=${(cfg.slot_max_time || "22:00:00").slice(0,5)} @change=${(e: Event) => this._onTimeChange("slot_max_time", e)} />
+      <div class="wrap">
+        <div class="section">
+          <h3>Calendars</h3>
+          <div class="cal-list">
+            ${ents.map((c, i) => this._calendarItem(i, c))}
+          </div>
+          <div style="margin-top:10px">
+            <button class="add" ?disabled=${ents.length >= MAX_CALENDARS} @click=${() => this._addCalendar()}>+ Add calendar</button>
+            <span class="hint" style="margin-left:8px">Up to ${MAX_CALENDARS} calendars.</span>
+          </div>
         </div>
-      </div>
 
-      <div class="row">
-        <div>Legend button width (ch)</div>
-        <input type="number" min="8" max="32" .value=${String(cfg.legend_button_ch ?? 15)} @change=${(e: Event) => this._onNumber("legend_button_ch", e)} />
-      </div>
-
-      <div class="row">
-        <div>Remember scroll/offset</div>
-        <input type="checkbox" .checked=${cfg.remember_offset !== false} @change=${(e: Event) => this._onBool("remember_offset", e)} />
-      </div>
-
-      <div class="row">
-        <div>Dialog width (px)</div>
-        <input type="number" min="0" max="1200" .value=${String(cfg.dialog_width_px ?? 0)} @change=${(e: Event) => this._onNumber("dialog_width_px", e)} />
-      </div>
-
-      <div class="row">
-        <div>Highlight colors</div>
-        <div class="two">
-          <input type="color" .value=${cfg.today_color || "#c8e3f9"} @change=${(e: Event) => this._onColor("today_color", e)} />
-          <input type="color" .value=${cfg.weekend_color || "#f0f0f0"} @change=${(e: Event) => this._onColor("weekend_color", e)} />
+        <div class="section">
+          <h3>Weather</h3>
+          <div class="row">
+            <label>Weather entity</label>
+            <ha-entity-picker
+              .hass=${(this as any).hass}
+              .value=${cfg.weather_entity || ""}
+              .includeDomains=${["weather"]}
+              allow-custom-entity
+              @value-changed=${(e: Event) => this._onWeatherEntity(e)}
+            ></ha-entity-picker>
+          </div>
         </div>
-      </div>
 
-      <div class="row">
-        <div>Now line color</div>
-        <input type="color" .value=${cfg.now_line_color || "#e53935"} @change=${(e: Event) => this._onColor("now_line_color", e)} />
+        <div class="section">
+          <h3>Time & Range</h3>
+          <div class="row">
+            <label>Time format</label>
+            <select @change=${(e: Event) => this._onSelect("time_format", e)}>
+              <option value="24" ?selected=${cfg.time_format !== "12"}>24-hour</option>
+              <option value="12" ?selected=${cfg.time_format === "12"}>12-hour</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>Visible days</label>
+            <input type="number" min="1" max="14" .value=${String(cfg.visible_days ?? 7)} @change=${(e: Event) => this._onNumber("visible_days", e)} />
+          </div>
+          <div class="row">
+            <label>Focus window</label>
+            <div class="two">
+              <input type="time" step="60" .value=${(cfg.slot_min_time || "07:00:00").slice(0,5)} @change=${(e: Event) => this._onTimeChange("slot_min_time", e)} />
+              <input type="time" step="60" .value=${(cfg.slot_max_time || "22:00:00").slice(0,5)} @change=${(e: Event) => this._onTimeChange("slot_max_time", e)} />
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Layout</h3>
+          <div class="row">
+            <label>Legend button width (ch)</label>
+            <input type="number" min="8" max="32" .value=${String(cfg.legend_button_ch ?? 15)} @change=${(e: Event) => this._onNumber("legend_button_ch", e)} />
+          </div>
+          <div class="row">
+            <label>Remember scroll/offset</label>
+            <input type="checkbox" .checked=${cfg.remember_offset !== false} @change=${(e: Event) => this._onBool("remember_offset", e)} />
+          </div>
+          <div class="row">
+            <label>Dialog width (px)</label>
+            <input type="number" min="0" max="1200" .value=${String(cfg.dialog_width_px ?? 0)} @change=${(e: Event) => this._onNumber("dialog_width_px", e)} />
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Highlights</h3>
+          <div class="cols-2">
+            <div class="row">
+              <label>Today background</label>
+              <input type="color" .value=${cfg.today_color || "#c8e3f9"} @input=${(e: Event) => this._onColor("today_color", e)} />
+            </div>
+            <div class="row">
+              <label>Weekend background</label>
+              <input type="color" .value=${cfg.weekend_color || "#f0f0f0"} @input=${(e: Event) => this._onColor("weekend_color", e)} />
+            </div>
+            <div class="row">
+              <label>Now line color</label>
+              <input type="color" .value=${cfg.now_line_color || "#e53935"} @input=${(e: Event) => this._onColor("now_line_color", e)} />
+            </div>
+          </div>
+        </div>
       </div>
     `;
   }
