@@ -1,5 +1,5 @@
 /* Multi-Calendar Grid Card
- * v0.8.0-dev.14 — fix time/header alignment & z-order; dialog width & clamps; remove empty all-day gap
+ * v0.8.0-dev.15 — fix visual editor call, make day headers reliably sticky, confine events under header
  */
 import { LitElement, css, html, nothing } from "lit";
 import "./editor/multi-calendar-grid-card-editor";
@@ -398,15 +398,15 @@ export class MultiCalendarGridCard extends LitElement {
     .empty{color:var(--secondary-text-color); padding:8px 12px; font-size:12px}
     .scroll{height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
     .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0); grid-template-columns:70px 1fr}
-    .col{background:var(--card-background-color,#fff); position:relative; overflow:hidden}
-    .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:6; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
-    .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0); background:var(--card-background-color,#fff); /* not sticky on purpose */ }
+    .col{background:var(--card-background-color,#fff); position:relative}
+    .dayhdr{position: sticky; top: 0; background:var(--card-background-color,#fff); z-index:6; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
+    .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0); background:var(--card-background-color,#fff)}
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .timecol{background:var(--card-background-color,#fff); position:relative}
     .tick{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.22); z-index:1}
     .tick.minor{border-top:1px dashed rgba(0,0,0,.14)}
     .hour-label{position:absolute; top:-8px; left:6px; font-size:12px; color:var(--secondary-text-color); z-index:2; background: var(--card-background-color,#fff); padding:0 4px}
-    .body{position:relative}
+    .body{position:relative; overflow:hidden}
     .gridline{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.22); z-index:1}
     .gridline.minor{border-top:1px dashed rgba(0,0,0,.14)}
     .event{position:absolute; border-radius:10px; padding:6px 8px; box-sizing:border-box; font-size:12px; line-height:1.15; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.12); z-index:2}
@@ -461,7 +461,13 @@ export class MultiCalendarGridCard extends LitElement {
   }
 
   static getConfigElement() {
-    return document.createElement("multi-calendar-grid-card-editor");
+    // Only return the editor if the custom element is registered; otherwise provide a safe fallback.
+    if (customElements.get("multi-calendar-grid-card-editor")) {
+      return document.createElement("multi-calendar-grid-card-editor");
+    }
+    const el = document.createElement("div");
+    el.innerHTML = `<div style="padding:8px">UI editor is loading… if it doesn't appear, use YAML for now.</div>`;
+    return el;
   }
 
   /** Config */
@@ -1115,7 +1121,7 @@ export class MultiCalendarGridCard extends LitElement {
         </div>
         ${body}
         <div class="actions" style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px">
-          <button class="btn" @click=${() => this._closeDialog()}>${tr(this._lang(), "close")}</button>
+          <button class="btn" @click=${() => this._closeDialog()}>${tr(lang, "close")}</button>
         </div>
       </div>
     </div>`;
