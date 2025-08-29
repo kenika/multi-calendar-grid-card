@@ -396,6 +396,8 @@ export class MultiCalendarGridCard extends LitElement {
     .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .timecol{background:var(--card-background-color,#fff); position:relative}
+    .timecol .spacer{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:5; border-bottom:1px solid var(--divider-color,#e0e0e0)}
+    .timecol .ticks{position:relative}
     .tick{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.22); z-index:1}
     .tick.minor{border-top:1px dashed rgba(0,0,0,.14)}
     .hour-label{position:absolute; top:-8px; left:6px; font-size:12px; color:var(--secondary-text-color); z-index:2; background: var(--card-background-color,#fff); padding:0 4px}
@@ -930,6 +932,7 @@ export class MultiCalendarGridCard extends LitElement {
     const ticks: unknown[] = [];
     const pxPerMin = this._pxPerMin();
     const step = Number(this._config.slot_minutes ?? DEFAULTS.slot_minutes);
+    const columnHeight = Math.round(1440 * pxPerMin);
     const use12 = this._config.time_format === "12";
     const lang = this._lang();
     const tf = new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit", hour12: use12 });
@@ -942,7 +945,10 @@ export class MultiCalendarGridCard extends LitElement {
         ticks.push(html`<div class="hour-label" style=${`top:${top - 8}px`}>${label}</div>`);
       }
     }
-    return html`<div class="timecol" style=${`grid-column:1/2; grid-row:1/-1; position:relative; padding-top:${this._timeColPad}px`}>${ticks}</div>`;
+    return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative;">
+      <div class="spacer" style=${`height:${this._timeColPad}px`}></div>
+      <div class="ticks" style=${`height:${columnHeight}px`}>${ticks}</div>
+    </div>`;
   }
 
   private _gridLinesDom(pxPerMin: number, stepMin: number) {
