@@ -266,8 +266,8 @@ export class MultiCalendarGridCardEditor extends LitElement {
         <div class="row">
           <label>Display format</label>
           <div class="tf-row">
-            <label><input type="radio" name="tf" value="24" .checked=${tf === "24"} @change=${(e: any) => this._updateConfig({ time_format: "24" })} /> 24-hour</label>
-            <label><input type="radio" name="tf" value="12" .checked=${tf === "12"} @change=${(e: any) => this._updateConfig({ time_format: "12" })} /> 12-hour</label>
+            <label><input type="radio" name="tf" value="24" .checked=${tf === "24"} @change=${(_e: any) => this._updateConfig({ time_format: "24" })} /> 24-hour</label>
+            <label><input type="radio" name="tf" value="12" .checked=${tf === "12"} @change=${(_e: any) => this._updateConfig({ time_format: "12" })} /> 12-hour</label>
           </div>
         </div>
       </div>
