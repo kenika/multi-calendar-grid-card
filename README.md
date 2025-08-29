@@ -53,8 +53,7 @@ start_today: true          # start the 7-day view at “today”
 slot_min_time: '07:00:00'  # HH:MM:SS
 slot_max_time: '22:00:00'  # HH:MM:SS
 slot_minutes: 60           # grid step; 1–180 (30–180 recommended)
-height_vh: 80              # card height (viewport %). 60–90 typical
-px_per_min: 1.6            # minute scale; leave default unless tuning
+height_vh: 60              # card height (viewport %). 60–90 typical
 legend_button_ch: 15       # legend button width in ch units
 header_compact: false
 show_now_indicator: true
@@ -76,7 +75,7 @@ Each calendar entry accepts:
 
 ### Time & layout
 - The grid always renders a full day (00:00–24:00); **`slot_min_time`/`slot_max_time`** control **focus** and default scroll position.
-- **`px_per_min`** defines vertical scale. In dev.12 this is **explicit**; (later versions may derive this value).
+- **`px_per_min`** defines vertical scale and is automatically derived from the card height and focus window.
 - **`legend_button_ch`** sets the minimum width of each legend button (in `ch`). Use `0` for no minimum.
 
 ### Weather
@@ -109,12 +108,6 @@ A simple editor is available to set common options **without editing YAML**:
 - **Local storage**: Week offset and scroll are namespaced by the set of entities to avoid collisions between cards.
 - **Accessibility**: Buttons have aria-labels; event dialog is keyboard‑dismissible.
 - **No `console.*`** in production builds (keeps ESLint clean).
-
----
-
-## Known issues in dev.12
-
-- In some themes, a **small vertical offset** may appear between the left time scale and the first grid line under the sticky headers. (Tracked and scheduled to fix by measuring header height and inserting an equal spacer in the time column.)
 
 ---
 
