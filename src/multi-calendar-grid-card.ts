@@ -1,5 +1,5 @@
 /* Multi-Calendar Grid Card
- * v0.8.0-dev.17 — derive px/min from height+focus, UX polish, sticky headers, no decorators
+ * v0.8.0-dev.12 — Tick alignment, DOM grid lines, midnight-to-midnight, dialog chips, dedup, 12/24h
  */
 import { LitElement, css, html, nothing } from "lit";
 import "./editor/multi-calendar-grid-card-editor";
@@ -23,7 +23,7 @@ export type MultiCalendarGridCardConfig = {
   start_today?: boolean;        // default true
   slot_min_time?: string;       // "07:00:00"
   slot_max_time?: string;       // "22:00:00"
-  slot_minutes?: number;        // grid step: 30..180
+  slot_minutes?: number;        // 30..180
   locale?: string;
   /** Global time format for labels and dialog */
   time_format?: "12" | "24";
@@ -33,7 +33,6 @@ export type MultiCalendarGridCardConfig = {
   /** LAYOUT */
   header_compact?: boolean;
   height_vh?: number;
-  /** px_per_min kept for backward-compat but is derived dynamically when height+focus available */
   px_per_min?: number;
   remember_offset?: boolean;
   storage_key?: string;
@@ -51,14 +50,8 @@ export type MultiCalendarGridCardConfig = {
   weekend_color?: string;
   now_line_color?: string;
 
-  /** LEGEND */
-  legend_button_ch?: number;
-
   /** RANGE */
   visible_days?: number; // 1..14, default 7
-
-  /** DIALOG */
-  dialog_width_px?: number; // 0 = 50vw
 };
 
 const DEFAULTS: Required<Pick<
@@ -78,8 +71,7 @@ const DEFAULTS: Required<Pick<
   | "storage_key"
   | "start_today"
   | "visible_days"
-  | "legend_button_ch"
-  >> = {
+>> = {
   slot_min_time: "07:00:00",
   slot_max_time: "22:00:00",
   slot_minutes: 30,
@@ -87,15 +79,14 @@ const DEFAULTS: Required<Pick<
   time_format: "24",
   show_now_indicator: true,
   show_all_day: true,
-  height_vh: 60,          // default height (vh) requested
+  height_vh: 80,
   remember_offset: true,
   header_compact: false,
   data_refresh_minutes: 5,
-  px_per_min: 1.6,        // fallback only; normally derived
+  px_per_min: 1.6,
   storage_key: `${CARD_TAG}.weekOffset`,
   start_today: true,
   visible_days: 7,
-  legend_button_ch: 15,
 };
 
 const STRINGS = {
@@ -367,14 +358,6 @@ export class MultiCalendarGridCard extends LitElement {
   private _tick?: number;
   private _refresh?: number;
   private _nsBase = "";
-  private _headerOffsetPx: number = 0;
-  private _pxPerMin: number = DEFAULTS.px_per_min;
-
-  private _resizeHandler = () => {
-    this._measureHeader();
-    this._derivePxPerMin();
-    this.requestUpdate();
-  };
 
   /** Reactive properties (no decorators) */
   static properties = {
@@ -397,24 +380,25 @@ export class MultiCalendarGridCard extends LitElement {
     .hdr{display:flex; justify-content:space-between; align-items:center; gap:14px; margin:12px}
     /* LEGEND as full-color buttons */
     .legend{display:flex; gap:8px; flex-wrap:wrap; font-size:14px}
-    .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; width: var(--legend-width, 15ch); text-align:center}
+    .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; min-width:110px; text-align:center}
     .legend .btn.active{border-color:transparent}
     .legend .name{font-weight:600}
+    .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
     .toolbar button{all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06)}
     .toolbar button:focus{outline:2px solid var(--primary-color)}
     .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
     .empty{color:var(--secondary-text-color); padding:8px 12px; font-size:12px}
-    .scroll{height: var(--mcg-height, 60vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
-    .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0); grid-template-columns:70px 1fr}
+    .scroll{height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
+    .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0)}
     .col{background:var(--card-background-color,#fff); position:relative}
-    .dayhdr{position: sticky; top: 0; background:var(--card-background-color,#fff); z-index:6; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
-    .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0); background:var(--card-background-color,#fff)}
+    .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
+    .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .timecol{background:var(--card-background-color,#fff); position:relative}
     .tick{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.22); z-index:1}
     .tick.minor{border-top:1px dashed rgba(0,0,0,.14)}
     .hour-label{position:absolute; top:-8px; left:6px; font-size:12px; color:var(--secondary-text-color); z-index:2; background: var(--card-background-color,#fff); padding:0 4px}
-    .body{position:relative; overflow:hidden}
+    .body{position:relative}
     .gridline{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.22); z-index:1}
     .gridline.minor{border-top:1px dashed rgba(0,0,0,.14)}
     .event{position:absolute; border-radius:10px; padding:6px 8px; box-sizing:border-box; font-size:12px; line-height:1.15; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.12); z-index:2}
@@ -456,19 +440,11 @@ export class MultiCalendarGridCard extends LitElement {
       weekend_color: "#f0f0f0",
       now_line_color: "#e53935",
       visible_days: 7,
-      legend_button_ch: 15,
-      dialog_width_px: 0,
     };
   }
 
-  static async getConfigElement() {
-    if (!customElements.get("multi-calendar-grid-card-editor")) {
-      try { await import("./editor/multi-calendar-grid-card-editor"); } catch {}
-      try { await customElements.whenDefined("multi-calendar-grid-card-editor"); } catch {}
-    }
-    const el = document.createElement("multi-calendar-grid-card-editor");
-    if (!(el as any).setConfig) { (el as any).setConfig = function(_: any) {}; }
-    return el;
+  static getConfigElement() {
+    return document.createElement("multi-calendar-grid-card-editor");
   }
 
   /** Config */
@@ -518,23 +494,15 @@ export class MultiCalendarGridCard extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     this._startTimers();
-    window.addEventListener("resize", this._resizeHandler, { passive: true });
   }
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this._stopTimers();
-    window.removeEventListener("resize", this._resizeHandler as any);
   }
   firstUpdated(): void {
-    this.updateComplete.then(() => {
-      this._measureHeader();
-      this._derivePxPerMin(true);
-      this._restoreScroll();
-    });
+    this.updateComplete.then(() => this._restoreScroll());
   }
   updated(changed: Map<PropertyKey, unknown>): void {
-    this._measureHeader();
-    this._derivePxPerMin();
     if (changed.has("_config") || changed.has("_weekAnchor")) {
       this._fetchEvents();
       this._loadWeather();
@@ -582,7 +550,8 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _restoreScroll() {
     const minMin = toMinutes(this._config.slot_min_time!);
-    const defaultTop = Math.max(0, Math.round(minMin * this._pxPerMin));
+    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
+    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin)); // align to exact minute, no fudge
     let top = defaultTop;
     if (this._config.remember_offset) {
       try {
@@ -605,35 +574,6 @@ export class MultiCalendarGridCard extends LitElement {
       localStorage.setItem(`${this._nsBase}.scrollTop`, String(sc.scrollTop));
     } catch {}
   };
-
-  private _measureHeader() {
-    const firstCol = this.renderRoot?.querySelector(".col") as HTMLElement | null;
-    const hdr = firstCol?.querySelector(".dayhdr") as HTMLElement | null;
-    const ad = firstCol?.querySelector(".allday") as HTMLElement | null;
-    const hH = hdr?.offsetHeight || 0;
-    const aH = ad?.offsetHeight || 0;
-    const sum = hH + aH;
-    if (sum !== this._headerOffsetPx) {
-      this._headerOffsetPx = sum;
-    }
-  }
-
-  /** Derive px per minute so that focus window fills the viewport (excluding sticky header/ad row) */
-  private _derivePxPerMin(force = false) {
-    const sc = this.renderRoot?.querySelector(".scroll") as HTMLElement | null;
-    if (!sc) return;
-    const viewH = sc.clientHeight; // visible height of scroll area
-    const focusMin = clamp(toMinutes(this._config.slot_min_time!), 0, 1440);
-    const focusMax = clamp(toMinutes(this._config.slot_max_time!), 0, 1440);
-    const span = Math.max(60, Math.min(1440, Math.abs(focusMax - focusMin))); // at least 1h
-    const avail = Math.max(120, viewH - this._headerOffsetPx); // guard
-    const derived = avail / span;
-    const safe = Number.isFinite(derived) && derived > 0.1 ? derived : (this._config.px_per_min || DEFAULTS.px_per_min);
-    if (force || Math.abs(safe - this._pxPerMin) > 0.01) {
-      this._pxPerMin = safe;
-      this.requestUpdate();
-    }
-  }
 
   private async _loadWeather() {
     const entity = this._config.weather_entity;
@@ -877,27 +817,24 @@ export class MultiCalendarGridCard extends LitElement {
     if (s.toDateString() === e.toDateString()) {
       return `${df.format(s)} • ${tf.format(s)}–${tf.format(e)}`;
     }
-    return `${df.format(s)} ${tf.format(s)} → ${df.format(e)} ${df.format(e)}`;
-  }
-
-  private _dialogWidthStyle() {
-    const px = Number(this._config.dialog_width_px || 0);
-    if (px > 0) {
-      return `--mdc-dialog-min-width:${px}px; --mdc-dialog-max-width:${Math.min(px, 900)}px;`;
-    }
-    return `--mdc-dialog-min-width:50vw; --mdc-dialog-max-width:900px;`;
+    return `${df.format(s)} ${tf.format(s)} → ${df.format(e)} ${tf.format(e)}`;
   }
 
   render() {
     const start = this._weekAnchor;
+    const end = addMinutes(new Date(start), (this._config.visible_days || 7) * 24 * 60 - 1);
     const lang = this._lang();
+    const rf = new Intl.DateTimeFormat(lang, { day: "2-digit", month: "short" });
     const vh = Number(this._config.height_vh || DEFAULTS.height_vh);
 
     return html`
-      <ha-card style=${`--legend-width:${(this._config.legend_button_ch || 15)}ch`}>
+      <ha-card>
         <div class="hdr">
           <div class="legend">
             ${this._config.entities.map((e) => this._legendItem(e))}
+          </div>
+          <div class="badge" title="${this._error ? this._error : ""}">
+            ${rf.format(start)} – ${rf.format(end)}
           </div>
           <div class="toolbar">
             <button type="button" aria-label="${tr(lang, "aria_prev_week")}" @click=${() => this._shiftWeek(-1)}>${tr(
@@ -956,31 +893,27 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _timeColumn() {
     const ticks: unknown[] = [];
+    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
     const step = Number(this._config.slot_minutes) || DEFAULTS.slot_minutes;
     const use12 = this._config.time_format === "12";
     const lang = this._lang();
     const tf = new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit", hour12: use12 });
     for (let m = 0; m <= 1440; m += step) {
-      const top = Math.round(m * this._pxPerMin);
-      const major = m % 60 === 0;
-      ticks.push(html`<div class=${major ? "tick" : "tick minor"} style=${`top:${top}px`}></div>`);
-      if (major) {
+      const top = Math.round(m * pxPerMin);
+      ticks.push(html`<div class=${m % 60 === 0 ? "tick" : "tick minor"} style=${`top:${top}px`}></div>`);
+      if (m % 60 === 0) {
         const ref = new Date(1970, 0, 1, Math.floor(m / 60), 0, 0, 0);
         const label = tf.format(ref);
         ticks.push(html`<div class="hour-label" style=${`top:${top - 8}px`}>${label}</div>`);
       }
     }
-    const columnHeight = Math.round(1440 * this._pxPerMin);
-    return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative">
-      <div style=${`height:${this._headerOffsetPx}px;`}></div>
-      <div class="time-body" style=${`height:${columnHeight}px; position:relative`}>${ticks}</div>
-    </div>`;
+    return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative">${ticks}</div>`;
   }
 
-  private _gridLinesDom(stepMin: number) {
+  private _gridLinesDom(pxPerMin: number, stepMin: number) {
     const lines: unknown[] = [];
     for (let m = 0; m <= 1440; m += stepMin) {
-      const top = Math.round(m * this._pxPerMin);
+      const top = Math.round(m * pxPerMin);
       const major = m % 60 === 0;
       lines.push(html`<div class=${major ? "gridline" : "gridline minor"} style=${`top:${top}px`}></div>`);
     }
@@ -989,7 +922,8 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _dayColumns(start: Date) {
     const out: unknown[] = [];
-    const columnHeight = Math.round(1440 * this._pxPerMin);
+    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
+    const columnHeight = Math.round(1440 * pxPerMin);
     const today = startOfDay(new Date());
 
     const todayColor = typeof this._config.today_color === "string" ? this._config.today_color : "#c8e3f9";
@@ -1009,8 +943,7 @@ export class MultiCalendarGridCard extends LitElement {
       if (isToday && todayColor) { headerBg = todayColor; bodyBg = todayColor; }
       else if (isWknd && weekendColor) { headerBg = weekendColor; bodyBg = weekendColor; }
 
-      const hasAllDay = this._config.show_all_day && (day?.allDay?.length || 0) > 0;
-      const allDay = hasAllDay
+      const allDay = this._config.show_all_day
         ? html`<div class="allday">
             ${(day?.allDay || []).map(
               (ev) => html`<div class="pill" @click=${() => this._open(ev)}>${ev.summary}
@@ -1021,14 +954,14 @@ export class MultiCalendarGridCard extends LitElement {
         : nothing;
 
       const timed = (day?.timed || []).map((ev) => {
-        const top = Math.round(ev.top * this._pxPerMin);
-        const height = Math.max(2, Math.round(ev.height * this._pxPerMin));
+        const top = Math.round(ev.top * pxPerMin);
+        const height = Math.max(2, Math.round(ev.height * pxPerMin));
         const share = 100 / Math.max(1, ev.cols || day?.laneCount || 1);
         const left = (ev.lane || 0) * share;
 
         const hex = colorToHex(ev.n.color || "#3366cc") || "#3366cc";
         const fg = fgOn(hex);
-        const bg = hex;
+        const bg = hex; // opaque
 
         return html`<div
           class="event"
@@ -1043,7 +976,7 @@ export class MultiCalendarGridCard extends LitElement {
 
       const nowLine = this._nowLineForDay(d);
       const wx = this._renderWeatherBand(date);
-      const gridLines = this._gridLinesDom(step);
+      const gridLines = this._gridLinesDom(pxPerMin, step);
 
       out.push(html`
         <div class="col" style=${`grid-column:${2 + d}/${3 + d}`}>
@@ -1057,7 +990,7 @@ export class MultiCalendarGridCard extends LitElement {
       `);
     }
 
-    out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr)}</style>`);
+    out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr); height:${columnHeight}px}</style>`);
     return out;
   }
 
@@ -1086,12 +1019,13 @@ export class MultiCalendarGridCard extends LitElement {
     const color = typeof colorRaw === "string" ? colorRaw : "#e53935";
     if (!showLegacy || color === "") return nothing;
 
+    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
     const start = addMinutes(this._weekAnchor, dayIndex * 24 * 60);
     const end = addMinutes(start, 24 * 60);
     const now = new Date();
     if (now < start || now > end) return nothing;
     const mins = (now.getTime() - start.getTime()) / 60000;
-    const top = Math.round(mins * this._pxPerMin);
+    const top = Math.round(mins * pxPerMin);
     return html`<div class="now" style=${`top:${top}px; background:${color}`}></div>`;
   }
 
@@ -1110,46 +1044,36 @@ export class MultiCalendarGridCard extends LitElement {
     if (!this._dialogOpen || !this._dialogEvent) return nothing;
     const ev = this._dialogEvent;
 
-    const chips = ev.allCalendars && ev.allCalendars.length ? html`
-      <div class="mcg-dlg-chips" style="display:flex; gap:6px; flex-wrap:nowrap">
-        ${ev.allCalendars.map(c => html`<span style=${`background:${c.color}; color:${fgOn(colorToHex(c.color)||'#3366cc')}; padding:4px 8px; border-radius:999px; font-size:12px`}>${c.name}</span>`)}
-      </div>` : nothing;
+    const chips = ev.allCalendars && ev.allCalendars.length ? html`<div style="display:flex; gap:6px; justify-content:flex-end; margin-bottom:8px;">
+      ${ev.allCalendars.map(c => html`<span style=${`padding:4px 8px; border-radius:999px; background:${c.color}; color:${fgOn(colorToHex(c.color)||'#3366cc')}; font-size:12px;`}>${c.name}</span>`)}
+    </div>` : nothing;
 
-    const lang = this._lang();
     const body = html`
+      <div class="row"><strong>${ev.summary}</strong></div>
       <div class="row">${this._fmtRange(ev.s, ev.e, ev.allDay)}</div>
       ${ev.location ? html`<div class="row">${ev.location}</div>` : nothing}
-      ${ev.description ? html`<div class="row"><div class="mcg-dlg-body" style="max-height:70vh; overflow:auto">${stripMarkup(ev.description)}</div></div>` : nothing}
+      ${ev.description ? html`<div class="row">${stripMarkup(ev.description)}</div>` : nothing}
     `;
 
     if ((customElements as any).get("ha-dialog")) {
-      return html`<ha-dialog .open=${this._dialogOpen} @closed=${() => this._closeDialog()} style=${this._dialogWidthStyle()}>
-        <div slot="heading" style="display:flex; align-items:center; gap:10px">
-          <div style="flex:1; min-width:0; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title=${ev.summary}>${ev.summary}</div>
-          ${chips}
-        </div>
-        ${body}
-        <mwc-button slot="primaryAction" dialogAction="close">${tr(lang, "close")}</mwc-button>
+      return html`<ha-dialog .open=${this._dialogOpen} @closed=${() => this._closeDialog()}>
+        <div slot="heading">${tr(this._lang(), "event_details")}</div>
+        ${chips}${body}
+        <mwc-button slot="primaryAction" dialogAction="close">${tr(this._lang(), "close")}</mwc-button>
       </ha-dialog>`;
     }
 
-    const px = Number(this._config.dialog_width_px || 0);
-    const w = px > 0 ? `${px}px` : "50vw";
     return html`<div class="overlay" @click=${(e: Event) => (e.target === e.currentTarget ? this._closeDialog() : null)}>
-      <div class="modal" role="dialog" aria-modal="true" aria-label="${tr(this._lang(), "event_details")}" style=${`width:${w}; max-width:900px;`}>
-        <div style="display:flex; align-items:center; gap:10px">
-          <div style="flex:1; min-width:0; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title=${ev.summary}>${ev.summary}</div>
-          ${chips}
-        </div>
-        ${body}
-        <div class="actions" style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px">
-          <button class="btn" @click=${() => this._closeDialog()}>${tr(lang, "close")}</button>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="${tr(this._lang(), "event_details")}">
+        <h3>${tr(this._lang(), "event_details")}</h3>
+        ${chips}${body}
+        <div class="actions">
+          <button class="btn" @click=${() => this._closeDialog()}>${tr(this._lang(), "close")}</button>
         </div>
       </div>
     </div>`;
   }
 
-  /** Misc */
   private _anyEvents() {
     return (this._days || []).some((d) => (d.allDay?.length || 0) + (d.timed?.length || 0) > 0);
   }
@@ -1167,7 +1091,7 @@ function stripMarkup(s?: string): string {
   t = t.replace(/<[^>]*>/g, "");
   t = t.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
   t = t.replace(/\*\*|__|\*|_|~~|`+/g, "");
-  t = t.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
   return t.trim();
 }
 

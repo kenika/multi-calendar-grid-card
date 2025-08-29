@@ -1,291 +1,430 @@
-/* Multi-Calendar Grid Card — Editor (rich, no decorators)
- * v0.8.0-dev.17 — adds Card height (vh), tidies layout, icon remove, keeps prior fields
+/* Multi-Calendar Grid Card – Visual Editor
+ * v0.8.0-dev.12 — compact hints; calendar blocks; visible days; time pickers; 12/24h
  */
 import { LitElement, css, html, nothing } from "lit";
 
-type EntityCfg = { entity: string; name?: string; color?: string };
+type EntityCfg = {
+  entity: string;
+  name?: string;
+  color?: string;
+};
+
 type CardConfig = {
-  type?: string;
-  entities: EntityCfg[];
+  entities?: EntityCfg[];
+  weather_entity?: string;
+
+  // Hidden but preserved
+  weather_days?: number;
+  weather_compact?: boolean;
+  header_compact?: boolean;
+  start_today?: boolean;
+  first_day?: number | "today";
+  show_all_day?: boolean;
+  slot_minutes?: number;
+  px_per_min?: number;
+  show_now_indicator?: boolean;
+
+  // Shown
   slot_min_time?: string;
   slot_max_time?: string;
-  visible_days?: number;
-  time_format?: "12" | "24";
-  weather_entity?: string;
-  legend_button_ch?: number;
+  height_vh?: number;
   remember_offset?: boolean;
+  data_refresh_minutes?: number;
+  locale?: string;
+  time_format?: "12" | "24";
+  // Highlights as colors (empty string disables)
   today_color?: string;
   weekend_color?: string;
   now_line_color?: string;
-  dialog_width_px?: number;
-  height_vh?: number;
+
+  visible_days?: number;
 };
 
+const DEFAULTS = {
+  slot_min_time: "07:00:00",
+  slot_max_time: "22:00:00",
+  slot_minutes: 30,
+  px_per_min: 1.6,
+  height_vh: 80,
+  remember_offset: true,
+  data_refresh_minutes: 5,
+  time_format: "24",
+  today_color: "#c8e3f9",
+  weekend_color: "#f0f0f0",
+  now_line_color: "#e53935",
+  visible_days: 7,
+} as const;
+
 const MAX_CALENDARS = 10;
-const DEFAULT_COLOR_PALETTE = ["#3f51b5","#9c27b0","#03a9f4","#009688","#ff9800","#e91e63","#8bc34a","#607d8b","#795548","#2196f3"];
 
 export class MultiCalendarGridCardEditor extends LitElement {
   hass: any;
-  private _config!: CardConfig;
+  private _config: CardConfig = {};
 
   static properties = {
     hass: { attribute: false },
     _config: { attribute: false, state: true },
   };
 
-  static styles = css`
-    :host { display:block; }
-    .wrap { max-width: 860px; padding: 8px 4px 16px; box-sizing: border-box; }
-    .section { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 12px; padding: 12px; margin: 10px 0; background: var(--card-background-color); }
-    .section h3 { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
-    .row { display: grid; grid-template-columns: 220px 1fr; gap: 14px; align-items: center; margin: 8px 0; }
-    .row > label { color: var(--secondary-text-color); }
-    .two { display:grid; grid-template-columns: 1fr 1fr; gap:12px }
-    input[type="time"], input[type="number"], input[type="text"], input[type="color"], select { width: 100% }
-    .hint { color: var(--secondary-text-color); font-size: 12px }
-    .cal-list { display: flex; flex-direction: column; gap: 10px; }
-    .cal-item { border: 1px solid var(--divider-color,#e0e0e0); border-radius: 10px; padding: 10px; position: relative; }
-    .cal-head { font-weight: 700; margin-bottom: 8px; display:flex; justify-content: space-between; align-items: center; }
-    .cal-grid { display:grid; grid-template-columns: 1fr 140px; gap: 10px; align-items: center; }
-    .cal-subgrid { display:grid; grid-template-columns: 1fr 140px; gap: 10px; align-items: center; }
-    .icon-btn { all: unset; cursor: pointer; border-radius: 8px; padding: 6px; background: rgba(0,0,0,.06); display:inline-flex; align-items:center; justify-content:center }
-    .add { all: unset; cursor: pointer; border-radius: 999px; padding: 8px 12px; background: rgba(0,0,0,.08); display:inline-flex; align-items:center; gap:8px; }
-    .cols-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  `;
-
-  setConfig(config: CardConfig): void {
-    this._config = { ...config };
-    if (!Array.isArray(this._config.entities)) this._config.entities = [];
-    this.requestUpdate();
+  setConfig(config: CardConfig) {
+    this._config = {
+      ...config,
+      entities: Array.isArray(config.entities) ? [...config.entities] : [],
+    };
+    this._syncDerivedPxPerMin();
   }
 
-  private _emitConfig() {
-    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config } }));
+  private _updateConfig(patch: Partial<CardConfig>) {
+    const next: CardConfig = { ...this._config, ...patch };
+    this._config = next;
+    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: next } }));
   }
 
-  private _onTimeChange(key: "slot_min_time" | "slot_max_time", e: Event) {
-    const inp = e.target as HTMLInputElement | null;
-    const v = inp?.value || "";
-    const value = v.length === 5 ? `${v}:00` : v; // normalize to HH:MM:SS
-    this._config = { ...this._config, [key]: value };
-    this._emitConfig();
+  private _updateEntity(idx: number, patch: Partial<EntityCfg>) {
+    const ents = [...(this._config.entities || [])];
+    const cur = ents[idx] || { entity: "" };
+    ents[idx] = { ...cur, ...patch };
+    this._updateConfig({ entities: ents });
   }
 
-  private _onNumber(key: keyof CardConfig, e: Event) {
-    const inp = e.target as HTMLInputElement | null;
-    const v = Number(inp?.value || "0");
-    this._config = { ...this._config, [key]: v };
-    this._emitConfig();
+  private _addEntity() {
+    const ents = [...(this._config.entities || [])];
+    if (ents.length >= MAX_CALENDARS) return;
+    ents.push({ entity: "", name: "", color: "#3f51b5" });
+    this._updateConfig({ entities: ents });
   }
 
-  private _onSelect(key: keyof CardConfig, e: Event) {
-    const sel = e.target as HTMLSelectElement | null;
-    const v = (sel?.value as any);
-    this._config = { ...this._config, [key]: v };
-    this._emitConfig();
+  private _removeEntity(idx: number) {
+    const ents = [...(this._config.entities || [])];
+    ents.splice(idx, 1);
+    this._updateConfig({ entities: ents });
   }
 
-  private _onColor(key: keyof CardConfig, e: Event) {
-    const inp = e.target as HTMLInputElement | null;
-    const v = inp?.value || "";
-    this._config = { ...this._config, [key]: v };
-    this._emitConfig();
+  private _minutesBetween(a: string, b: string) {
+    const toMin = (s: string) => {
+      const [H,M,S] = s.split(":").map((n) => Number(n));
+      return (H||0)*60 + (M||0) + (S||0)/60;
+    };
+    return Math.max(1, toMin(b) - toMin(a));
   }
 
-  private _onBool(key: keyof CardConfig, e: Event) {
-    const inp = e.target as HTMLInputElement | null;
-    const v = !!inp?.checked;
-    this._config = { ...this._config, [key]: v as any };
-    this._emitConfig();
+  private _syncDerivedPxPerMin() {
+    const min = this._config.slot_min_time || DEFAULTS.slot_min_time;
+    const max = this._config.slot_max_time || DEFAULTS.slot_max_time;
+    const minutes = this._minutesBetween(min, max);
+    const vh = (this._config.height_vh ?? DEFAULTS.height_vh);
+    const viewportPx = Math.max(600, window.innerHeight || 900);
+    const visiblePx = (vh / 100) * viewportPx;
+    const pxPerMin = Math.max(0.2, Math.min(5, visiblePx / minutes));
+    if (!Number.isFinite(pxPerMin)) return;
+    this._updateConfig({ px_per_min: Math.round(pxPerMin * 100) / 100 });
   }
 
-  private _onCalendarEntity(i: number, ev: Event) {
-    const detailVal = (ev as any).detail?.value;
-    const value = detailVal != null ? detailVal : (ev.target as any)?.value;
-    const list = [...this._config.entities];
-    const prev = list[i] || { entity: "" };
-    const next = { ...prev, entity: value || "" };
-    if (!next.name) {
-      const st = (this as any).hass?.states?.[value];
-      if (st?.attributes?.friendly_name) next.name = st.attributes.friendly_name;
+  private _safe<T>(v: T | undefined, d: T) { return v === undefined || v === null ? d : v; }
+
+  private _validColorHex(c?: string) {
+    if (!c) return null;
+    const t = String(c).trim();
+    if (/^#([0-9a-f]{6})$/i.test(t)) return t;
+    if (/^#([0-9a-f]{3})$/i.test(t)) {
+      const r = t[1], g = t[2], b = t[3];
+      return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
     }
-    list[i] = next;
-    this._config = { ...this._config, entities: list };
-    this._emitConfig();
+    return null;
   }
 
-  private _onCalendarName(i: number, e: Event) {
-    const v = (e.target as HTMLInputElement | null)?.value || "";
-    const list = [...this._config.entities];
-    const prev = list[i] || { entity: "" };
-    list[i] = { ...prev, name: v };
-    this._config = { ...this._config, entities: list };
-    this._emitConfig();
+  private _parseHHMMSS(s?: string) {
+    if (!s) return { h: 0, m: 0 };
+    const [H,M] = s.split(":");
+    return { h: Number(H)||0, m: Number(M)||0 };
   }
 
-  private _onCalendarColor(i: number, e: Event) {
-    const v = (e.target as HTMLInputElement | null)?.value || "";
-    const list = [...this._config.entities];
-    const prev = list[i] || { entity: "" };
-    list[i] = { ...prev, color: v };
-    this._config = { ...this._config, entities: list };
-    this._emitConfig();
+  private _formatHHMMSS(h: number, m: number) {
+    const hh = String(h).padStart(2,"0");
+    const mm = String(m).padStart(2,"0");
+    return `${hh}:${mm}:00`;
   }
 
-  private _removeCalendar(i: number) {
-    const list = [...this._config.entities];
-    list.splice(i, 1);
-    this._config = { ...this._config, entities: list };
-    this._emitConfig();
-  }
+  private _renderTimePicker(labelTxt: string, key: "slot_min_time" | "slot_max_time", tf: "12" | "24", value: string) {
+    const { h, m } = this._parseHHMMSS(value);
+    const hours = tf === "24" ? Array.from({length:24}, (_,i)=>i) : Array.from({length:12}, (_,i)=>i+1);
+    const mins = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+    const is12 = tf === "12";
+    const curH = is12 ? ((h % 12) || 12) : h;
+    const curP = h >= 12 ? "PM" : "AM";
 
-  private _addCalendar() {
-    const list = [...(this._config.entities || [])];
-    if (list.length >= MAX_CALENDARS) return;
-    const color = DEFAULT_COLOR_PALETTE[list.length % DEFAULT_COLOR_PALETTE.length];
-    list.push({ entity: "", name: "", color });
-    this._config = { ...this._config, entities: list };
-    this._emitConfig();
-  }
+    const onChange = (ev: any) => {
+      const host = (ev.currentTarget as HTMLElement).closest('.twocol');
+      if (!host) return;
+      const hs = host.querySelector('[data-role="h"]') as HTMLSelectElement | null;
+      const ms = host.querySelector('[data-role="m"]') as HTMLSelectElement | null;
+      const ps = host.querySelector('[data-role="p"]') as HTMLSelectElement | null;
+      if (!hs || !ms) return;
+      let H = Number(hs.value);
+      const M = Number(ms.value);
+      if (is12) {
+        const P = ps?.value || "AM";
+        if (P === "PM" && H < 12) H += 12;
+        if (P === "AM" && H === 12) H = 0;
+      }
+      const hhmmss = this._formatHHMMSS(H, M);
+      this._updateConfig({ [key]: hhmmss } as any);
+      this._syncDerivedPxPerMin();
+    };
 
-  private _onWeatherEntity(ev: Event) {
-    const detailVal = (ev as any).detail?.value;
-    const value = detailVal != null ? detailVal : (ev.target as any)?.value;
-    this._config = { ...this._config, weather_entity: value || "" };
-    this._emitConfig();
-  }
-
-  private _calendarItem(i: number, cfg: EntityCfg) {
-    const name = cfg.name || cfg.entity || `Calendar ${i+1}`;
     return html`
-      <div class="cal-item">
-        <div class="cal-head">
-          <div>${name}</div>
-          <button class="icon-btn" @click=${() => this._removeCalendar(i)} aria-label="Remove calendar">
-            <ha-icon icon="mdi:trash-can-outline"></ha-icon>
-          </button>
-        </div>
-        <div class="cal-grid">
-          <div>
-            <ha-entity-picker
-              .hass=${(this as any).hass}
-              .value=${cfg.entity || ""}
-              .includeDomains=${["calendar"]}
-              allow-custom-entity
-              @value-changed=${(e: Event) => this._onCalendarEntity(i, e)}
-            ></ha-entity-picker>
-          </div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span class="hint">Color</span>
-            <input type="color" .value=${cfg.color || DEFAULT_COLOR_PALETTE[i % DEFAULT_COLOR_PALETTE.length]} @input=${(e: Event) => this._onCalendarColor(i, e)} />
-          </div>
-        </div>
-        <div class="cal-subgrid" style="margin-top:8px">
-          <input type="text" placeholder="Display name" .value=${cfg.name || ""} @input=${(e: Event) => this._onCalendarName(i, e)} />
-          <div></div>
+      <div class="row two">
+        <label>${labelTxt}</label>
+        <div class="twocol timepick">
+          <select data-role="h" @change=${onChange}>
+            ${hours.map(v => html`<option .selected=${v===curH} .value=${v}>${tf==="24" ? String(v).padStart(2,"0") : v}</option>`)}
+          </select>
+          <span>:</span>
+          <select data-role="m" @change=${onChange}>
+            ${mins.map(v => html`<option .selected=${v===m} .value=${v}>${String(v).padStart(2,"0")}</option>`)}
+          </select>
+          ${is12 ? html`<select data-role="p" @change=${onChange}>
+            ${["AM","PM"].map(v => html`<option .selected=${v===curP} .value=${v}>${v}</option>`)}
+          </select>` : nothing}
         </div>
       </div>
     `;
   }
 
   render() {
-    if (!this._config) return nothing;
-    const cfg = this._config;
-    const ents = Array.isArray(cfg.entities) ? cfg.entities : [];
+    const ents = this._config.entities || [];
+    const reachedMax = ents.length >= MAX_CALENDARS;
+    const tf = this._safe(this._config.time_format, DEFAULTS.time_format);
 
     return html`
       <div class="wrap">
-        <div class="section">
-          <h3>Calendars</h3>
-          <div class="cal-list">
-            ${ents.map((c, i) => this._calendarItem(i, c))}
-          </div>
-          <div style="margin-top:10px">
-            <button class="add" ?disabled=${ents.length >= MAX_CALENDARS} @click=${() => this._addCalendar()}>
-              <ha-icon icon="mdi:plus"></ha-icon> Add calendar
-            </button>
-            <span class="hint" style="margin-left:8px">Up to ${MAX_CALENDARS} calendars.</span>
-          </div>
-        </div>
+        ${this._calendarsSection(ents, reachedMax)}
+        ${this._weatherSection()}
+        ${this._daysRangeSection()}
+        ${this._gridSection()}
+        ${this._timeFormatSection(tf)}
+        ${this._highlightsSection()}
+        ${this._behaviorSection()}
+      </div>
+    `;
+  }
 
-        <div class="section">
-          <h3>Weather</h3>
-          <div class="row">
-            <label>Weather entity</label>
+  private _calendarsSection(ents: EntityCfg[], reachedMax: boolean) {
+    return html`
+      <div class="section">
+        <div class="section-title">Calendars</div>
+
+        ${ents.map((row, i) => this._calendarBlock(row, i))}
+
+        <div class="add-row">
+          <button class="add-btn" ?disabled=${reachedMax} @click=${this._addEntity}>＋ Add calendar</button>
+          ${reachedMax ? html`<span class="hint">Max ${MAX_CALENDARS} calendars</span>` : nothing}
+        </div>
+      </div>
+    `;
+  }
+
+  private _calendarBlock(row: EntityCfg, i: number) {
+    const colorVal = this._validColorHex(row.color) || "#3f51b5";
+    return html`
+      <div class="cal-block">
+        <div class="cal-head">Calendar ${i + 1}</div>
+        <div class="cal-grid">
+          <div class="c1">
             <ha-entity-picker
-              .hass=${(this as any).hass}
-              .value=${cfg.weather_entity || ""}
-              .includeDomains=${["weather"]}
+              .hass=${this.hass}
+              .value=${row.entity}
+              .includeDomains=${["calendar"]}
               allow-custom-entity
-              @value-changed=${(e: Event) => this._onWeatherEntity(e)}
+              @value-changed=${(ev: any) => this._updateEntity(i, { entity: ev.detail.value || "" })}
             ></ha-entity-picker>
           </div>
-        </div>
 
-        <div class="section">
-          <h3>Time & Range</h3>
-          <div class="row">
-            <label>Time format</label>
-            <select @change=${(e: Event) => this._onSelect("time_format", e)}>
-              <option value="24" ?selected=${cfg.time_format !== "12"}>24-hour</option>
-              <option value="12" ?selected=${cfg.time_format === "12"}>12-hour</option>
-            </select>
+          <div class="c2">
+            <input
+              class="name"
+              type="text"
+              placeholder="Display name (optional)"
+              .value=${row.name || ""}
+              @input=${(ev: any) => this._updateEntity(i, { name: ev.target.value })}
+            />
+            <button class="color-btn" style=${`--clr:${colorVal}`} @click=${(ev: any) => {
+              const parentEl = (ev.currentTarget as HTMLElement).parentElement;
+              const inp: HTMLInputElement | null = parentEl ? (parentEl.querySelector('input[type="color"]') as HTMLInputElement | null) : null;
+              if (inp) inp.click();
+            }}>Color</button>
+            <input type="color" class="color" .value=${colorVal} @input=${(ev: any) => this._updateEntity(i, { color: ev.target.value })} />
           </div>
-          <div class="row">
-            <label>Visible days</label>
-            <input type="number" min="1" max="14" .value=${String(cfg.visible_days ?? 7)} @change=${(e: Event) => this._onNumber("visible_days", e)} />
-          </div>
-          <div class="row">
-            <label>Focus window</label>
-            <div class="two">
-              <input type="time" step="60" .value=${(cfg.slot_min_time || "07:00:00").slice(0,5)} @change=${(e: Event) => this._onTimeChange("slot_min_time", e)} />
-              <input type="time" step="60" .value=${(cfg.slot_max_time || "22:00:00").slice(0,5)} @change=${(e: Event) => this._onTimeChange("slot_max_time", e)} />
-            </div>
-          </div>
-        </div>
 
-        <div class="section">
-          <h3>Layout</h3>
-          <div class="row">
-            <label>Card height (vh)</label>
-            <input type="number" min="40" max="100" .value=${String(cfg.height_vh ?? 60)} @change=${(e: Event) => this._onNumber("height_vh", e)} />
-          </div>
-          <div class="row">
-            <label>Legend button width (ch)</label>
-            <input type="number" min="8" max="32" .value=${String(cfg.legend_button_ch ?? 15)} @change=${(e: Event) => this._onNumber("legend_button_ch", e)} />
-          </div>
-          <div class="row">
-            <label>Remember scroll/offset</label>
-            <input type="checkbox" .checked=${cfg.remember_offset !== false} @change=${(e: Event) => this._onBool("remember_offset", e)} />
-          </div>
-          <div class="row">
-            <label>Dialog width (px)</label>
-            <input type="number" min="0" max="1200" .value=${String(cfg.dialog_width_px ?? 0)} @change=${(e: Event) => this._onNumber("dialog_width_px", e)} />
-          </div>
-        </div>
-
-        <div class="section">
-          <h3>Highlights</h3>
-          <div class="cols-2">
-            <div class="row">
-              <label>Today background</label>
-              <input type="color" .value=${cfg.today_color || "#c8e3f9"} @input=${(e: Event) => this._onColor("today_color", e)} />
-            </div>
-            <div class="row">
-              <label>Weekend background</label>
-              <input type="color" .value=${cfg.weekend_color || "#f0f0f0"} @input=${(e: Event) => this._onColor("weekend_color", e)} />
-            </div>
-            <div class="row">
-              <label>Now line color</label>
-              <input type="color" .value=${cfg.now_line_color || "#e53935"} @input=${(e: Event) => this._onColor("now_line_color", e)} />
-            </div>
+          <div class="cDel">
+            <button class="del-btn" title="Remove" @click=${() => this._removeEntity(i)}>-</button>
           </div>
         </div>
       </div>
     `;
   }
+
+  private _weatherSection() {
+    return html`
+      <div class="section">
+        <div class="section-title">Weather (optional)</div>
+        <div class="row">
+          <label>Weather entity</label>
+          <ha-entity-picker
+            .hass=${this.hass}
+            .value=${this._config.weather_entity || ""}
+            .includeDomains=${["weather"]}
+            allow-custom-entity
+            @value-changed=${(ev: any) => this._updateConfig({ weather_entity: ev.detail.value || "" })}
+          ></ha-entity-picker>
+        </div>
+      </div>
+    `;
+  }
+
+  private _daysRangeSection() {
+    return html`
+      <div class="section">
+        <div class="section-title">Visible days</div>
+        <div class="row">
+          <label>Number of days</label>
+          <input type="number" min="1" max="14"
+            .value=${this._safe(this._config.visible_days, DEFAULTS.visible_days)}
+            @input=${(ev: any) => this._updateConfig({ visible_days: Math.max(1, Math.min(14, Number(ev.target.value) || 7)) })} />
+        </div>
+        <div class="hint">Choose 1–14 days (default 7).</div>
+      </div>
+    `;
+  }
+
+  private _gridSection() {
+    const tf = this._safe(this._config.time_format, DEFAULTS.time_format) as ("12" | "24");
+    return html`
+      <div class="section">
+        <div class="section-title">Default focus</div>
+        ${this._renderTimePicker("Start time", "slot_min_time", tf, this._config.slot_min_time || DEFAULTS.slot_min_time)}
+        ${this._renderTimePicker("End time", "slot_max_time", tf, this._config.slot_max_time || DEFAULTS.slot_max_time)}
+        <div class="row">
+          <label>Height (vh)</label>
+          <input type="number" min="40" max="100" .value=${this._safe(this._config.height_vh, DEFAULTS.height_vh)}
+            @input=${(ev: any) => { this._updateConfig({ height_vh: Number(ev.target.value) || DEFAULTS.height_vh }); this._syncDerivedPxPerMin(); }} />
+        </div>
+      </div>
+    `;
+  }
+
+  private _timeFormatSection(tf: "12" | "24") {
+    return html`
+      <div class="section">
+        <div class="section-title">Time format</div>
+        <div class="row">
+          <label>Display format</label>
+          <div class="tf-row">
+            <label><input type="radio" name="tf" value="24" .checked=${tf === "24"} @change=${(_e: any) => this._updateConfig({ time_format: "24" })} /> 24-hour</label>
+            <label><input type="radio" name="tf" value="12" .checked=${tf === "12"} @change=${(_e: any) => this._updateConfig({ time_format: "12" })} /> 12-hour</label>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private _colorRow(labelTxt: string, key: "today_color" | "weekend_color" | "now_line_color", val: string) {
+    const none = (val || "") === "";
+    const hex = this._validColorHex(val) || "#2196f3";
+    return html`
+      <div class="row">
+        <label>${labelTxt}</label>
+        <div class="color-row">
+          <label class="none"><input type="checkbox" .checked=${none} @change=${(ev: any) => {
+            this._updateConfig({ [key]: ev.target.checked ? "" : hex } as any);
+          }} /> None</label>
+          <button class="color-btn big" style=${`--clr:${hex}`} ?disabled=${none} @click=${(ev: any) => {
+            const parentEl2 = (ev.currentTarget as HTMLElement).parentElement;
+            const inp: HTMLInputElement | null = parentEl2 ? (parentEl2.querySelector('input[type="color"]') as HTMLInputElement | null) : null;
+            if (inp) inp.click();
+          }}>Pick color</button>
+          <input type="color" class="color" .value=${hex} ?disabled=${none} @input=${(ev: any) => this._updateConfig({ [key]: ev.target.value } as any)} />
+        </div>
+      </div>
+    `;
+  }
+
+  private _highlightsSection() {
+    return html`
+      <div class="section">
+        <div class="section-title">Highlights</div>
+
+        ${this._colorRow("Today highlight", "today_color", this._safe(this._config.today_color, DEFAULTS.today_color))}
+        ${this._colorRow("Weekend highlight", "weekend_color", this._safe(this._config.weekend_color, DEFAULTS.weekend_color))}
+        ${this._colorRow("Now line", "now_line_color", this._safe(this._config.now_line_color, DEFAULTS.now_line_color))}
+        <div class="hint">Pick a color or choose ‘None’ to disable.</div>
+      </div>
+    `;
+  }
+
+  private _behaviorSection() {
+    return html`
+      <div class="section">
+        <div class="section-title">Behavior</div>
+        <div class="row">
+          <label>Refresh interval (min)</label>
+          <input type="number" min="1" max="60" .value=${this._safe(this._config.data_refresh_minutes, DEFAULTS.data_refresh_minutes)}
+            @input=${(ev: any) => this._updateConfig({ data_refresh_minutes: Number(ev.target.value) || DEFAULTS.data_refresh_minutes })} />
+        </div>
+
+        <div class="row">
+          <label><input type="checkbox"
+            .checked=${this._safe(this._config.remember_offset, true)}
+            @change=${(ev: any) => this._updateConfig({ remember_offset: ev.target.checked })} />
+            Remember scroll position</label>
+        </div>
+      </div>
+    `;
+  }
+
+  static styles = css`
+    :host { display: block; }
+    .wrap { display: grid; gap: 16px; padding: 8px; max-width: var(--mcg-editor-max-width, 820px); }
+
+    .section { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 12px; padding: 12px; background: var(--card-background-color, #fff); overflow: visible; }
+    .section-title { font-weight: 700; margin-bottom: 10px; }
+
+    .row { display: grid; grid-template-columns: 220px 1fr; align-items: center; gap: 12px; margin: 8px 0; }
+    .row.two { grid-template-columns: 220px auto; }
+    .timepick { display:flex; align-items:center; gap:8px; }
+    .timepick select { height: 40px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); padding: 0 8px; }
+
+    .add-row { display:flex; align-items:center; gap:10px; margin-top: 10px; }
+    .add-btn { all: unset; cursor: pointer; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.06); }
+    .add-btn[disabled] { opacity:.5; cursor: not-allowed; }
+
+    .cal-block { border: 1px dashed var(--divider-color, #ddd); border-radius: 10px; padding: 10px; margin: 10px 0; }
+    .cal-head { font-weight: 700; margin-bottom: 8px; }
+
+    /* 2-row grid with delete button spanning rows */
+    .cal-grid { display: grid; grid-template-columns: 1fr 52px; grid-template-rows: 48px 48px; gap: 10px; align-items: center; }
+    .cal-grid .c1 { grid-column: 1 / 2; grid-row: 1 / 2; }
+    .cal-grid .c2 { grid-column: 1 / 2; grid-row: 2 / 3; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+    .cal-grid .cDel { grid-column: 2 / 3; grid-row: 1 / 3; align-self: center; display:flex; align-items:center; justify-content:center; }
+
+    .del-btn { all: unset; width: 44px; height: 44px; border-radius: 12px; background: rgba(229,57,53,.12); cursor: pointer; display:flex; align-items:center; justify-content:center; font-size: 24px; }
+    .del-btn:hover { filter: brightness(0.96); }
+
+    input[type="text"], input[type="number"] { height: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); color: var(--primary-text-color, #111); }
+
+    .color-btn { all: unset; cursor: pointer; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--secondary-background-color, rgba(0,0,0,.02)); }
+    .color-btn.big { width: 140px; }
+    .color-btn::before { content: ""; display:inline-block; width: 16px; height: 16px; border-radius: 4px; background: var(--clr, #2196f3); margin-right: 8px; vertical-align: middle; }
+    input[type="color"].color { visibility: hidden; width: 0; height: 0; padding: 0; margin: 0; border: 0; }
+
+    .tf-row { display:flex; gap:16px; align-items:center; }
+    .color-row { display:flex; align-items:center; gap: 12px; }
+    .color-row .none { display:flex; align-items:center; gap: 8px; }
+
+    ha-entity-picker { width: 100%; --mdc-menu-max-height: 300px; }
+    .hint { color: var(--secondary-text-color); font-size: 12px; margin-top: 4px; }
+    label { color: var(--primary-text-color); font-weight: 500; }
+  `;
 }
 
-if (!customElements.get("multi-calendar-grid-card-editor")) {
-  customElements.define("multi-calendar-grid-card-editor", MultiCalendarGridCardEditor);
-}
+customElements.define("multi-calendar-grid-card-editor", MultiCalendarGridCardEditor as any);
