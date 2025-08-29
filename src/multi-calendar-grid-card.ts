@@ -1,5 +1,5 @@
 /* Multi-Calendar Grid Card
- * v0.8.0-dev.15 — fix visual editor call, make day headers reliably sticky, confine events under header
+ * v0.8.0-dev.17 — derive px/min from height+focus, UX polish, sticky headers, no decorators
  */
 import { LitElement, css, html, nothing } from "lit";
 import "./editor/multi-calendar-grid-card-editor";
@@ -23,7 +23,7 @@ export type MultiCalendarGridCardConfig = {
   start_today?: boolean;        // default true
   slot_min_time?: string;       // "07:00:00"
   slot_max_time?: string;       // "22:00:00"
-  slot_minutes?: number;        // 30..180
+  slot_minutes?: number;        // grid step: 30..180
   locale?: string;
   /** Global time format for labels and dialog */
   time_format?: "12" | "24";
@@ -33,6 +33,7 @@ export type MultiCalendarGridCardConfig = {
   /** LAYOUT */
   header_compact?: boolean;
   height_vh?: number;
+  /** px_per_min kept for backward-compat but is derived dynamically when height+focus available */
   px_per_min?: number;
   remember_offset?: boolean;
   storage_key?: string;
@@ -86,11 +87,11 @@ const DEFAULTS: Required<Pick<
   time_format: "24",
   show_now_indicator: true,
   show_all_day: true,
-  height_vh: 80,
+  height_vh: 60,          // default height (vh) requested
   remember_offset: true,
   header_compact: false,
   data_refresh_minutes: 5,
-  px_per_min: 1.6,
+  px_per_min: 1.6,        // fallback only; normally derived
   storage_key: `${CARD_TAG}.weekOffset`,
   start_today: true,
   visible_days: 7,
@@ -367,6 +368,13 @@ export class MultiCalendarGridCard extends LitElement {
   private _refresh?: number;
   private _nsBase = "";
   private _headerOffsetPx: number = 0;
+  private _pxPerMin: number = DEFAULTS.px_per_min;
+
+  private _resizeHandler = () => {
+    this._measureHeader();
+    this._derivePxPerMin();
+    this.requestUpdate();
+  };
 
   /** Reactive properties (no decorators) */
   static properties = {
@@ -396,7 +404,7 @@ export class MultiCalendarGridCard extends LitElement {
     .toolbar button:focus{outline:2px solid var(--primary-color)}
     .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
     .empty{color:var(--secondary-text-color); padding:8px 12px; font-size:12px}
-    .scroll{height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
+    .scroll{height: var(--mcg-height, 60vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
     .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0); grid-template-columns:70px 1fr}
     .col{background:var(--card-background-color,#fff); position:relative}
     .dayhdr{position: sticky; top: 0; background:var(--card-background-color,#fff); z-index:6; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
@@ -423,13 +431,6 @@ export class MultiCalendarGridCard extends LitElement {
     .mcg-wx[data-native] .sep::before{ content:" / "; color: var(--secondary-text-color) }
     .mcg-wx[data-native] .pp{ color: var(--secondary-text-color); font-size:11px }
     .mcg-wx[data-native] ha-icon { --mdc-icon-size:20px }
-
-    /* Dialog layout */
-    .mcg-dlg-heading{ display:flex; align-items:center; gap:10px; margin-bottom:6px }
-    .mcg-dlg-title{ flex:1; min-width:0; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-    .mcg-dlg-chips{ display:flex; gap:6px; flex-wrap:nowrap }
-    .mcg-chip{ padding:4px 8px; border-radius:999px; font-size:12px }
-    .mcg-dlg-body{ max-height:70vh; overflow:auto }
   `;
 
   /** Lovelace editor stub */
@@ -466,7 +467,6 @@ export class MultiCalendarGridCard extends LitElement {
       try { await customElements.whenDefined("multi-calendar-grid-card-editor"); } catch {}
     }
     const el = document.createElement("multi-calendar-grid-card-editor");
-    // Safety: provide a no-op setConfig until upgrade completes
     if (!(el as any).setConfig) { (el as any).setConfig = function(_: any) {}; }
     return el;
   }
@@ -518,17 +518,23 @@ export class MultiCalendarGridCard extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     this._startTimers();
+    window.addEventListener("resize", this._resizeHandler, { passive: true });
   }
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this._stopTimers();
+    window.removeEventListener("resize", this._resizeHandler as any);
   }
   firstUpdated(): void {
-    this.updateComplete.then(() => this._restoreScroll());
+    this.updateComplete.then(() => {
+      this._measureHeader();
+      this._derivePxPerMin(true);
+      this._restoreScroll();
+    });
   }
   updated(changed: Map<PropertyKey, unknown>): void {
-    // Always re-measure header after each render (weather icon size may change it)
     this._measureHeader();
+    this._derivePxPerMin();
     if (changed.has("_config") || changed.has("_weekAnchor")) {
       this._fetchEvents();
       this._loadWeather();
@@ -576,8 +582,7 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _restoreScroll() {
     const minMin = toMinutes(this._config.slot_min_time!);
-    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
-    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin));
+    const defaultTop = Math.max(0, Math.round(minMin * this._pxPerMin));
     let top = defaultTop;
     if (this._config.remember_offset) {
       try {
@@ -602,13 +607,32 @@ export class MultiCalendarGridCard extends LitElement {
   };
 
   private _measureHeader() {
-    // Measure first column header + all-day (if present) to align left time scale spacer
     const firstCol = this.renderRoot?.querySelector(".col") as HTMLElement | null;
     const hdr = firstCol?.querySelector(".dayhdr") as HTMLElement | null;
     const ad = firstCol?.querySelector(".allday") as HTMLElement | null;
     const hH = hdr?.offsetHeight || 0;
     const aH = ad?.offsetHeight || 0;
-    this._headerOffsetPx = hH + aH;
+    const sum = hH + aH;
+    if (sum !== this._headerOffsetPx) {
+      this._headerOffsetPx = sum;
+    }
+  }
+
+  /** Derive px per minute so that focus window fills the viewport (excluding sticky header/ad row) */
+  private _derivePxPerMin(force = false) {
+    const sc = this.renderRoot?.querySelector(".scroll") as HTMLElement | null;
+    if (!sc) return;
+    const viewH = sc.clientHeight; // visible height of scroll area
+    const focusMin = clamp(toMinutes(this._config.slot_min_time!), 0, 1440);
+    const focusMax = clamp(toMinutes(this._config.slot_max_time!), 0, 1440);
+    const span = Math.max(60, Math.min(1440, Math.abs(focusMax - focusMin))); // at least 1h
+    const avail = Math.max(120, viewH - this._headerOffsetPx); // guard
+    const derived = avail / span;
+    const safe = Number.isFinite(derived) && derived > 0.1 ? derived : (this._config.px_per_min || DEFAULTS.px_per_min);
+    if (force || Math.abs(safe - this._pxPerMin) > 0.01) {
+      this._pxPerMin = safe;
+      this.requestUpdate();
+    }
   }
 
   private async _loadWeather() {
@@ -932,13 +956,12 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _timeColumn() {
     const ticks: unknown[] = [];
-    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
     const step = Number(this._config.slot_minutes) || DEFAULTS.slot_minutes;
     const use12 = this._config.time_format === "12";
     const lang = this._lang();
     const tf = new Intl.DateTimeFormat(lang, { hour: "numeric", minute: "2-digit", hour12: use12 });
     for (let m = 0; m <= 1440; m += step) {
-      const top = Math.round(m * pxPerMin);
+      const top = Math.round(m * this._pxPerMin);
       const major = m % 60 === 0;
       ticks.push(html`<div class=${major ? "tick" : "tick minor"} style=${`top:${top}px`}></div>`);
       if (major) {
@@ -947,17 +970,17 @@ export class MultiCalendarGridCard extends LitElement {
         ticks.push(html`<div class="hour-label" style=${`top:${top - 8}px`}>${label}</div>`);
       }
     }
-    const columnHeight = Math.round(1440 * pxPerMin);
+    const columnHeight = Math.round(1440 * this._pxPerMin);
     return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative">
       <div style=${`height:${this._headerOffsetPx}px;`}></div>
       <div class="time-body" style=${`height:${columnHeight}px; position:relative`}>${ticks}</div>
     </div>`;
   }
 
-  private _gridLinesDom(pxPerMin: number, stepMin: number) {
+  private _gridLinesDom(stepMin: number) {
     const lines: unknown[] = [];
     for (let m = 0; m <= 1440; m += stepMin) {
-      const top = Math.round(m * pxPerMin);
+      const top = Math.round(m * this._pxPerMin);
       const major = m % 60 === 0;
       lines.push(html`<div class=${major ? "gridline" : "gridline minor"} style=${`top:${top}px`}></div>`);
     }
@@ -966,8 +989,7 @@ export class MultiCalendarGridCard extends LitElement {
 
   private _dayColumns(start: Date) {
     const out: unknown[] = [];
-    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
-    const columnHeight = Math.round(1440 * pxPerMin);
+    const columnHeight = Math.round(1440 * this._pxPerMin);
     const today = startOfDay(new Date());
 
     const todayColor = typeof this._config.today_color === "string" ? this._config.today_color : "#c8e3f9";
@@ -999,14 +1021,14 @@ export class MultiCalendarGridCard extends LitElement {
         : nothing;
 
       const timed = (day?.timed || []).map((ev) => {
-        const top = Math.round(ev.top * pxPerMin);
-        const height = Math.max(2, Math.round(ev.height * pxPerMin));
+        const top = Math.round(ev.top * this._pxPerMin);
+        const height = Math.max(2, Math.round(ev.height * this._pxPerMin));
         const share = 100 / Math.max(1, ev.cols || day?.laneCount || 1);
         const left = (ev.lane || 0) * share;
 
         const hex = colorToHex(ev.n.color || "#3366cc") || "#3366cc";
         const fg = fgOn(hex);
-        const bg = hex; // opaque
+        const bg = hex;
 
         return html`<div
           class="event"
@@ -1021,7 +1043,7 @@ export class MultiCalendarGridCard extends LitElement {
 
       const nowLine = this._nowLineForDay(d);
       const wx = this._renderWeatherBand(date);
-      const gridLines = this._gridLinesDom(pxPerMin, step);
+      const gridLines = this._gridLinesDom(step);
 
       out.push(html`
         <div class="col" style=${`grid-column:${2 + d}/${3 + d}`}>
@@ -1064,13 +1086,12 @@ export class MultiCalendarGridCard extends LitElement {
     const color = typeof colorRaw === "string" ? colorRaw : "#e53935";
     if (!showLegacy || color === "") return nothing;
 
-    const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
     const start = addMinutes(this._weekAnchor, dayIndex * 24 * 60);
     const end = addMinutes(start, 24 * 60);
     const now = new Date();
     if (now < start || now > end) return nothing;
     const mins = (now.getTime() - start.getTime()) / 60000;
-    const top = Math.round(mins * pxPerMin);
+    const top = Math.round(mins * this._pxPerMin);
     return html`<div class="now" style=${`top:${top}px; background:${color}`}></div>`;
   }
 
@@ -1090,21 +1111,21 @@ export class MultiCalendarGridCard extends LitElement {
     const ev = this._dialogEvent;
 
     const chips = ev.allCalendars && ev.allCalendars.length ? html`
-      <div class="mcg-dlg-chips">
-        ${ev.allCalendars.map(c => html`<span class="mcg-chip" style=${`background:${c.color}; color:${fgOn(colorToHex(c.color)||'#3366cc')}`}>${c.name}</span>`)}
+      <div class="mcg-dlg-chips" style="display:flex; gap:6px; flex-wrap:nowrap">
+        ${ev.allCalendars.map(c => html`<span style=${`background:${c.color}; color:${fgOn(colorToHex(c.color)||'#3366cc')}; padding:4px 8px; border-radius:999px; font-size:12px`}>${c.name}</span>`)}
       </div>` : nothing;
 
     const lang = this._lang();
     const body = html`
       <div class="row">${this._fmtRange(ev.s, ev.e, ev.allDay)}</div>
       ${ev.location ? html`<div class="row">${ev.location}</div>` : nothing}
-      ${ev.description ? html`<div class="row"><div class="mcg-dlg-body">${stripMarkup(ev.description)}</div></div>` : nothing}
+      ${ev.description ? html`<div class="row"><div class="mcg-dlg-body" style="max-height:70vh; overflow:auto">${stripMarkup(ev.description)}</div></div>` : nothing}
     `;
 
     if ((customElements as any).get("ha-dialog")) {
       return html`<ha-dialog .open=${this._dialogOpen} @closed=${() => this._closeDialog()} style=${this._dialogWidthStyle()}>
-        <div slot="heading" class="mcg-dlg-heading">
-          <div class="mcg-dlg-title" title=${ev.summary}>${ev.summary}</div>
+        <div slot="heading" style="display:flex; align-items:center; gap:10px">
+          <div style="flex:1; min-width:0; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title=${ev.summary}>${ev.summary}</div>
           ${chips}
         </div>
         ${body}
@@ -1116,8 +1137,8 @@ export class MultiCalendarGridCard extends LitElement {
     const w = px > 0 ? `${px}px` : "50vw";
     return html`<div class="overlay" @click=${(e: Event) => (e.target === e.currentTarget ? this._closeDialog() : null)}>
       <div class="modal" role="dialog" aria-modal="true" aria-label="${tr(this._lang(), "event_details")}" style=${`width:${w}; max-width:900px;`}>
-        <div class="mcg-dlg-heading">
-          <div class="mcg-dlg-title" title=${ev.summary}>${ev.summary}</div>
+        <div style="display:flex; align-items:center; gap:10px">
+          <div style="flex:1; min-width:0; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title=${ev.summary}>${ev.summary}</div>
           ${chips}
         </div>
         ${body}

@@ -1,11 +1,6 @@
-/* Multi-Calendar Grid Card — Rich Editor (no decorators)
- * v0.8.0-dev.16
- * - Restores full-featured editor with entities manager (max 10), weather picker,
- *   focus window, visible days (1..14), time format, legend width, highlight colors,
- *   remember offset, dialog width.
- * - Uses no Lit decorators to satisfy strict TS/ESLint config.
+/* Multi-Calendar Grid Card — Editor (rich, no decorators)
+ * v0.8.0-dev.17 — adds Card height (vh), tidies layout, icon remove, keeps prior fields
  */
-
 import { LitElement, css, html, nothing } from "lit";
 
 type EntityCfg = { entity: string; name?: string; color?: string };
@@ -23,13 +18,13 @@ type CardConfig = {
   weekend_color?: string;
   now_line_color?: string;
   dialog_width_px?: number;
+  height_vh?: number;
 };
 
 const MAX_CALENDARS = 10;
 const DEFAULT_COLOR_PALETTE = ["#3f51b5","#9c27b0","#03a9f4","#009688","#ff9800","#e91e63","#8bc34a","#607d8b","#795548","#2196f3"];
 
 export class MultiCalendarGridCardEditor extends LitElement {
-  // Reactive fields without decorators
   hass: any;
   private _config!: CardConfig;
 
@@ -40,10 +35,10 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
   static styles = css`
     :host { display:block; }
-    .wrap { max-width: 720px; padding: 8px 4px 16px; box-sizing: border-box; }
+    .wrap { max-width: 860px; padding: 8px 4px 16px; box-sizing: border-box; }
     .section { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 12px; padding: 12px; margin: 10px 0; background: var(--card-background-color); }
     .section h3 { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
-    .row { display: grid; grid-template-columns: 180px 1fr; gap: 12px; align-items: center; margin: 8px 0; }
+    .row { display: grid; grid-template-columns: 220px 1fr; gap: 14px; align-items: center; margin: 8px 0; }
     .row > label { color: var(--secondary-text-color); }
     .two { display:grid; grid-template-columns: 1fr 1fr; gap:12px }
     input[type="time"], input[type="number"], input[type="text"], input[type="color"], select { width: 100% }
@@ -51,16 +46,14 @@ export class MultiCalendarGridCardEditor extends LitElement {
     .cal-list { display: flex; flex-direction: column; gap: 10px; }
     .cal-item { border: 1px solid var(--divider-color,#e0e0e0); border-radius: 10px; padding: 10px; position: relative; }
     .cal-head { font-weight: 700; margin-bottom: 8px; display:flex; justify-content: space-between; align-items: center; }
-    .cal-grid { display:grid; grid-template-columns: 1fr 120px; gap: 10px; align-items: center; }
-    .cal-subgrid { display:grid; grid-template-columns: 1fr 120px; gap: 10px; align-items: center; }
-    .remove { all: unset; cursor: pointer; border-radius: 8px; padding: 6px 10px; background: rgba(0,0,0,.06); }
+    .cal-grid { display:grid; grid-template-columns: 1fr 140px; gap: 10px; align-items: center; }
+    .cal-subgrid { display:grid; grid-template-columns: 1fr 140px; gap: 10px; align-items: center; }
+    .icon-btn { all: unset; cursor: pointer; border-radius: 8px; padding: 6px; background: rgba(0,0,0,.06); display:inline-flex; align-items:center; justify-content:center }
     .add { all: unset; cursor: pointer; border-radius: 999px; padding: 8px 12px; background: rgba(0,0,0,.08); display:inline-flex; align-items:center; gap:8px; }
     .cols-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .chip { display:inline-block; border-radius: 999px; padding: 4px 8px; font-size: 12px; border: 1px solid var(--divider-color,#e0e0e0); }
   `;
 
   setConfig(config: CardConfig): void {
-    // Ensure defaults
     this._config = { ...config };
     if (!Array.isArray(this._config.entities)) this._config.entities = [];
     this.requestUpdate();
@@ -168,7 +161,9 @@ export class MultiCalendarGridCardEditor extends LitElement {
       <div class="cal-item">
         <div class="cal-head">
           <div>${name}</div>
-          <button class="remove" @click=${() => this._removeCalendar(i)}>- Remove</button>
+          <button class="icon-btn" @click=${() => this._removeCalendar(i)} aria-label="Remove calendar">
+            <ha-icon icon="mdi:trash-can-outline"></ha-icon>
+          </button>
         </div>
         <div class="cal-grid">
           <div>
@@ -181,7 +176,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
             ></ha-entity-picker>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <span class="chip">Color</span>
+            <span class="hint">Color</span>
             <input type="color" .value=${cfg.color || DEFAULT_COLOR_PALETTE[i % DEFAULT_COLOR_PALETTE.length]} @input=${(e: Event) => this._onCalendarColor(i, e)} />
           </div>
         </div>
@@ -206,7 +201,9 @@ export class MultiCalendarGridCardEditor extends LitElement {
             ${ents.map((c, i) => this._calendarItem(i, c))}
           </div>
           <div style="margin-top:10px">
-            <button class="add" ?disabled=${ents.length >= MAX_CALENDARS} @click=${() => this._addCalendar()}>+ Add calendar</button>
+            <button class="add" ?disabled=${ents.length >= MAX_CALENDARS} @click=${() => this._addCalendar()}>
+              <ha-icon icon="mdi:plus"></ha-icon> Add calendar
+            </button>
             <span class="hint" style="margin-left:8px">Up to ${MAX_CALENDARS} calendars.</span>
           </div>
         </div>
@@ -249,6 +246,10 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
         <div class="section">
           <h3>Layout</h3>
+          <div class="row">
+            <label>Card height (vh)</label>
+            <input type="number" min="40" max="100" .value=${String(cfg.height_vh ?? 60)} @change=${(e: Event) => this._onNumber("height_vh", e)} />
+          </div>
           <div class="row">
             <label>Legend button width (ch)</label>
             <input type="number" min="8" max="32" .value=${String(cfg.legend_button_ch ?? 15)} @change=${(e: Event) => this._onNumber("legend_button_ch", e)} />
