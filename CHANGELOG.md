@@ -4,5 +4,5 @@
 - Stable UI editor for common options (entities, weather, focus window, height).
 - Robust native weather in headers (HA strategies + aggregation for hourly).
 - Rolling 7-day view starting today; sticky headers; now indicator (optional).
-- LocalStorage persistence for week offset and scroll position.
+- localStorage persistence for week offset and scroll position.
 - **Known**: minor time-scale/grid offset under some themes.
