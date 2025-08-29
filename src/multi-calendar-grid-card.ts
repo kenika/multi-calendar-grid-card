@@ -1,5 +1,5 @@
 /* Multi-Calendar Grid Card
- * v0.8.0-dev.13 — Align time scale with headers; remove date badge; fixed-width legend buttons
+ * v0.8.0-dev.14 — fix time/header alignment & z-order; dialog width & clamps; remove empty all-day gap
  */
 import { LitElement, css, html, nothing } from "lit";
 import "./editor/multi-calendar-grid-card-editor";
@@ -55,6 +55,9 @@ export type MultiCalendarGridCardConfig = {
 
   /** RANGE */
   visible_days?: number; // 1..14, default 7
+
+  /** DIALOG */
+  dialog_width_px?: number; // 0 = 50vw
 };
 
 const DEFAULTS: Required<Pick<
@@ -75,7 +78,7 @@ const DEFAULTS: Required<Pick<
   | "start_today"
   | "visible_days"
   | "legend_button_ch"
->> = {
+  >> = {
   slot_min_time: "07:00:00",
   slot_max_time: "22:00:00",
   slot_minutes: 30,
@@ -394,10 +397,10 @@ export class MultiCalendarGridCard extends LitElement {
     .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
     .empty{color:var(--secondary-text-color); padding:8px 12px; font-size:12px}
     .scroll{height: var(--mcg-height, 80vh); margin: 0 12px 12px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--divider-color,#e0e0e0); border-radius:12px; background:var(--divider-color,#e0e0e0)}
-    .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0)}
-    .col{background:var(--card-background-color,#fff); position:relative}
-    .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
-    .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
+    .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0); grid-template-columns:70px 1fr}
+    .col{background:var(--card-background-color,#fff); position:relative; overflow:hidden}
+    .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:6; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
+    .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0); background:var(--card-background-color,#fff); /* not sticky on purpose */ }
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .timecol{background:var(--card-background-color,#fff); position:relative}
     .tick{position:absolute; left:0; right:0; border-top:1px solid rgba(0,0,0,.22); z-index:1}
@@ -420,6 +423,13 @@ export class MultiCalendarGridCard extends LitElement {
     .mcg-wx[data-native] .sep::before{ content:" / "; color: var(--secondary-text-color) }
     .mcg-wx[data-native] .pp{ color: var(--secondary-text-color); font-size:11px }
     .mcg-wx[data-native] ha-icon { --mdc-icon-size:20px }
+
+    /* Dialog layout */
+    .mcg-dlg-heading{ display:flex; align-items:center; gap:10px; margin-bottom:6px }
+    .mcg-dlg-title{ flex:1; min-width:0; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    .mcg-dlg-chips{ display:flex; gap:6px; flex-wrap:nowrap }
+    .mcg-chip{ padding:4px 8px; border-radius:999px; font-size:12px }
+    .mcg-dlg-body{ max-height:70vh; overflow:auto }
   `;
 
   /** Lovelace editor stub */
@@ -446,6 +456,7 @@ export class MultiCalendarGridCard extends LitElement {
       now_line_color: "#e53935",
       visible_days: 7,
       legend_button_ch: 15,
+      dialog_width_px: 0,
     };
   }
 
@@ -509,10 +520,12 @@ export class MultiCalendarGridCard extends LitElement {
     this.updateComplete.then(() => this._restoreScroll());
   }
   updated(changed: Map<PropertyKey, unknown>): void {
+    // Always re-measure header after each render (weather icon size may change it)
+    this._measureHeader();
     if (changed.has("_config") || changed.has("_weekAnchor")) {
       this._fetchEvents();
       this._loadWeather();
-      this.updateComplete.then(() => { this._measureHeader(); this._restoreScroll(); });
+      this.updateComplete.then(() => this._restoreScroll());
     }
   }
 
@@ -557,7 +570,7 @@ export class MultiCalendarGridCard extends LitElement {
   private _restoreScroll() {
     const minMin = toMinutes(this._config.slot_min_time!);
     const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
-    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin)); // align to exact minute, no fudge
+    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin));
     let top = defaultTop;
     if (this._config.remember_offset) {
       try {
@@ -582,9 +595,13 @@ export class MultiCalendarGridCard extends LitElement {
   };
 
   private _measureHeader() {
-    // measure the first day header height to align the left time scale
-    const hdr = this.renderRoot?.querySelector('.col .dayhdr') as HTMLElement | null;
-    this._headerOffsetPx = hdr?.offsetHeight || 0;
+    // Measure first column header + all-day (if present) to align left time scale spacer
+    const firstCol = this.renderRoot?.querySelector(".col") as HTMLElement | null;
+    const hdr = firstCol?.querySelector(".dayhdr") as HTMLElement | null;
+    const ad = firstCol?.querySelector(".allday") as HTMLElement | null;
+    const hH = hdr?.offsetHeight || 0;
+    const aH = ad?.offsetHeight || 0;
+    this._headerOffsetPx = hH + aH;
   }
 
   private async _loadWeather() {
@@ -829,7 +846,15 @@ export class MultiCalendarGridCard extends LitElement {
     if (s.toDateString() === e.toDateString()) {
       return `${df.format(s)} • ${tf.format(s)}–${tf.format(e)}`;
     }
-    return `${df.format(s)} ${tf.format(s)} → ${df.format(e)} ${tf.format(e)}`;
+    return `${df.format(s)} ${tf.format(s)} → ${df.format(e)} ${df.format(e)}`;
+  }
+
+  private _dialogWidthStyle() {
+    const px = Number(this._config.dialog_width_px || 0);
+    if (px > 0) {
+      return `--mdc-dialog-min-width:${px}px; --mdc-dialog-max-width:${Math.min(px, 900)}px;`;
+    }
+    return `--mdc-dialog-min-width:50vw; --mdc-dialog-max-width:900px;`;
   }
 
   render() {
@@ -955,7 +980,8 @@ export class MultiCalendarGridCard extends LitElement {
       if (isToday && todayColor) { headerBg = todayColor; bodyBg = todayColor; }
       else if (isWknd && weekendColor) { headerBg = weekendColor; bodyBg = weekendColor; }
 
-      const allDay = this._config.show_all_day
+      const hasAllDay = this._config.show_all_day && (day?.allDay?.length || 0) > 0;
+      const allDay = hasAllDay
         ? html`<div class="allday">
             ${(day?.allDay || []).map(
               (ev) => html`<div class="pill" @click=${() => this._open(ev)}>${ev.summary}
@@ -1056,36 +1082,46 @@ export class MultiCalendarGridCard extends LitElement {
     if (!this._dialogOpen || !this._dialogEvent) return nothing;
     const ev = this._dialogEvent;
 
-    const chips = ev.allCalendars && ev.allCalendars.length ? html`<div style="display:flex; gap:6px; justify-content:flex-end; margin-bottom:8px;">
-      ${ev.allCalendars.map(c => html`<span style=${`padding:4px 8px; border-radius:999px; background:${c.color}; color:${fgOn(colorToHex(c.color)||'#3366cc')}; font-size:12px;`}>${c.name}</span>`)}
-    </div>` : nothing;
+    const chips = ev.allCalendars && ev.allCalendars.length ? html`
+      <div class="mcg-dlg-chips">
+        ${ev.allCalendars.map(c => html`<span class="mcg-chip" style=${`background:${c.color}; color:${fgOn(colorToHex(c.color)||'#3366cc')}`}>${c.name}</span>`)}
+      </div>` : nothing;
 
+    const lang = this._lang();
     const body = html`
-      <div class="row"><strong>${ev.summary}</strong></div>
       <div class="row">${this._fmtRange(ev.s, ev.e, ev.allDay)}</div>
       ${ev.location ? html`<div class="row">${ev.location}</div>` : nothing}
-      ${ev.description ? html`<div class="row">${stripMarkup(ev.description)}</div>` : nothing}
+      ${ev.description ? html`<div class="row"><div class="mcg-dlg-body">${stripMarkup(ev.description)}</div></div>` : nothing}
     `;
 
     if ((customElements as any).get("ha-dialog")) {
-      return html`<ha-dialog .open=${this._dialogOpen} @closed=${() => this._closeDialog()}>
-        <div slot="heading">${tr(this._lang(), "event_details")}</div>
-        ${chips}${body}
-        <mwc-button slot="primaryAction" dialogAction="close">${tr(this._lang(), "close")}</mwc-button>
+      return html`<ha-dialog .open=${this._dialogOpen} @closed=${() => this._closeDialog()} style=${this._dialogWidthStyle()}>
+        <div slot="heading" class="mcg-dlg-heading">
+          <div class="mcg-dlg-title" title=${ev.summary}>${ev.summary}</div>
+          ${chips}
+        </div>
+        ${body}
+        <mwc-button slot="primaryAction" dialogAction="close">${tr(lang, "close")}</mwc-button>
       </ha-dialog>`;
     }
 
+    const px = Number(this._config.dialog_width_px || 0);
+    const w = px > 0 ? `${px}px` : "50vw";
     return html`<div class="overlay" @click=${(e: Event) => (e.target === e.currentTarget ? this._closeDialog() : null)}>
-      <div class="modal" role="dialog" aria-modal="true" aria-label="${tr(this._lang(), "event_details")}">
-        <h3>${tr(this._lang(), "event_details")}</h3>
-        ${chips}${body}
-        <div class="actions">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="${tr(this._lang(), "event_details")}" style=${`width:${w}; max-width:900px;`}>
+        <div class="mcg-dlg-heading">
+          <div class="mcg-dlg-title" title=${ev.summary}>${ev.summary}</div>
+          ${chips}
+        </div>
+        ${body}
+        <div class="actions" style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px">
           <button class="btn" @click=${() => this._closeDialog()}>${tr(this._lang(), "close")}</button>
         </div>
       </div>
     </div>`;
   }
 
+  /** Misc */
   private _anyEvents() {
     return (this._days || []).some((d) => (d.allDay?.length || 0) + (d.timed?.length || 0) > 0);
   }
