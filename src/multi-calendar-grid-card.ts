@@ -1,6 +1,6 @@
 /* Multi-Calendar Grid Card
- * Weather headers + rolling 7-day view + color-based highlights
- * Version: 0.8.0-dev.9
+ * Weather headers + rolling 7-day view + highlights + dedup + 12/24h
+ * Version: 0.8.0-dev.10
  */
 import { LitElement, css, html, nothing } from "lit";
 import "./editor/multi-calendar-grid-card-editor";
@@ -46,10 +46,10 @@ export type MultiCalendarGridCardConfig = {
   weather_days?: number;
   weather_compact?: boolean;
 
-  /** HIGHLIGHTS (new) */
-  today_color?: string;         // if '', no today highlight
-  weekend_color?: string;       // if '', no weekend highlight
-  now_line_color?: string;      // if '', no now line
+  /** HIGHLIGHTS (as colors; '' disables) */
+  today_color?: string;
+  weekend_color?: string;
+  now_line_color?: string;
 };
 
 const DEFAULTS: Required<Pick<
@@ -140,7 +140,7 @@ const isWeekend = (d: Date) => {
 const colorToHex = (raw?: string) => {
   const t = String(raw || "").trim();
   if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t)) return t.toLowerCase();
-  if (/^rgba?\(/.test(t) || /^var\(--/.test(t)) return null; // cannot hex → treated elsewhere
+  if (/^rgba?\(/.test(t) || /^var\(--/.test(t)) return null; // treat elsewhere
   return "#3366cc";
 };
 const fgOn = (hex: string) => {
@@ -319,6 +319,7 @@ type CalEvent = {
   description?: string;
   color: string;
   src: string;
+  alsoColors?: string[];
   raw: CalEventRaw;
 };
 
@@ -375,7 +376,7 @@ export class MultiCalendarGridCard extends LitElement {
     .hdr{display:flex; justify-content:space-between; align-items:center; gap:14px; margin:12px}
     /* LEGEND as full-color buttons */
     .legend{display:flex; gap:8px; flex-wrap:wrap; font-size:14px}
-    .legend .btn{all:unset; cursor:pointer; padding:6px 12px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; gap:8px}
+    .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; min-width:110px; text-align:center}
     .legend .btn.active{border-color:transparent}
     .legend .name{font-weight:600}
     .legend .dot{width:10px; height:10px; border-radius:50%}
@@ -397,6 +398,8 @@ export class MultiCalendarGridCard extends LitElement {
     .body{position:relative}
     .event{position:absolute; border-radius:10px; padding:6px 8px; box-sizing:border-box; font-size:12px; line-height:1.15; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,.12)}
     .event .title{font-weight:700}
+    .event .marks{position:absolute; right:6px; bottom:6px; display:flex; gap:4px}
+    .event .mark{width:8px; height:8px; border-radius:2px; box-shadow:0 0 0 1px rgba(0,0,0,.25) inset}
     .now{position:absolute; left:0; right:0; height:2px; background: var(--error-color,#e53935); z-index:3}
     .footer{font-size:10px; color:var(--secondary-text-color); text-align:right; margin:4px 12px 10px}
 
@@ -437,8 +440,8 @@ export class MultiCalendarGridCard extends LitElement {
       start_today: true,
       time_format: "24",
       // Visual defaults:
-      today_color: "rgba(33,150,243,.10)",
-      weekend_color: "rgba(0,0,0,.05)",
+      today_color: "#c8e3f9",
+      weekend_color: "#f0f0f0",
       now_line_color: "#e53935",
     };
   }
@@ -655,6 +658,41 @@ export class MultiCalendarGridCard extends LitElement {
       }
     }
 
+    // Deduplicate events across calendars by signature
+    const byKey = new Map<string, any[]>();
+    const keyOf = (ev: any) => {
+      const s0 = ev.start?.dateTime || ev.start?.date || ev.start;
+      const e0 = ev.end?.dateTime || ev.end?.date || ev.end;
+      const s = new Date(s0).getTime();
+      const e = new Date(e0).getTime();
+      const t = String(ev.summary || "").trim().toLowerCase();
+      const loc = String(ev.location || "").trim().toLowerCase();
+      return `${s}|${e}|${t}|${loc}`;
+    };
+    for (const ev of all) {
+      const k = keyOf(ev);
+      const arr = byKey.get(k);
+      if (arr) arr.push(ev);
+      else byKey.set(k, [ev]);
+    }
+
+    // Map to unique list. Choose primary by earliest position in config entities order.
+    const order: Record<string, number> = {};
+    this._config.entities.forEach((e, i) => (order[e.entity] = i));
+
+    const uniq: any[] = [];
+    for (const [, list] of byKey) {
+      if (list.length === 1) {
+        uniq.push(list[0]);
+      } else {
+        const sorted = list.slice().sort((a, b) => (order[a.__id] ?? 999) - (order[b.__id] ?? 999));
+        const primary = sorted[0];
+        const rest = sorted.slice(1);
+        primary.__alsoColors = rest.map((r: any) => r.__color).filter((c: any) => !!c);
+        uniq.push(primary);
+      }
+    }
+
     const days: {
       date: Date;
       allDay: CalEvent[];
@@ -668,7 +706,7 @@ export class MultiCalendarGridCard extends LitElement {
       const alls: CalEvent[] = [];
       const timed: { n: CalEvent; top: number; height: number; lane: number }[] = [];
 
-      for (const raw of all) {
+      for (const raw of uniq) {
         const n = this._normalizeEvent(raw, raw.__id);
         if ((n.allDay ? new Date(n.e.getTime() - 1) : n.e) > dayStart && n.s < dayEnd) {
           if (n.allDay) {
@@ -730,6 +768,7 @@ export class MultiCalendarGridCard extends LitElement {
       description: ev.description,
       color: ev.__color || "#3366cc",
       src,
+      alsoColors: Array.isArray((ev as any).__alsoColors) ? (ev as any).__alsoColors : [],
       raw: ev,
     };
   }
@@ -842,8 +881,8 @@ export class MultiCalendarGridCard extends LitElement {
 
     const hex = colorToHex(e.color || "#3366cc") || "#3366cc";
     const fg = fgOn(hex);
-    const styleActive = `background:${hex}; color:${fg}`;
-    const styleInactive = `background:transparent; color:var(--primary-text-color,#111)`;
+    const styleActive = `background:${hex}; color:${fg}; border-color:transparent`;
+    const styleInactive = `background:${rgba(hex,0.12)}; border:1px solid ${hex}; color:var(--primary-text-color,#111)`;
 
     return html`<button class="btn ${active ? "active" : ""}" style=${active ? styleActive : styleInactive} @click=${toggle}>
       <span class="dot" style=${`background:${hex}`}></span>
@@ -881,12 +920,12 @@ export class MultiCalendarGridCard extends LitElement {
     const todayColor = this._resolveColor(
       this._config.today_color,
       (this as any)._config?.highlight_today !== false,
-      "rgba(33,150,243,.10)"
+      "#c8e3f9"
     );
     const weekendColor = this._resolveColor(
       this._config.weekend_color,
       (this as any)._config?.highlight_weekends !== false,
-      "rgba(0,0,0,.05)"
+      "#f0f0f0"
     );
 
     for (let d = 0; d < 7; d++) {
@@ -910,7 +949,9 @@ export class MultiCalendarGridCard extends LitElement {
       const allDay = this._config.show_all_day
         ? html`<div class="allday">
             ${(day?.allDay || []).map(
-              (ev) => html`<div class="pill" @click=${() => this._open(ev)}>${ev.summary}</div>`
+              (ev) => html`<div class="pill" @click=${() => this._open(ev)}>${ev.summary}
+              ${ev.alsoColors && ev.alsoColors.length ? html`<span style="margin-left:6px; display:inline-flex; gap:3px; vertical-align:middle;">${ev.alsoColors.map(c => html`<span style="width:8px;height:8px;border-radius:2px;display:inline-block;box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;background:${c}"></span>`)}</span>` : nothing}
+            </div>`
             )}
           </div>`
         : nothing;
@@ -933,12 +974,19 @@ export class MultiCalendarGridCard extends LitElement {
           @click=${() => this._open(ev.n)}
         >
           <div class="title">${ev.n.summary}</div>
+          ${ev.n.alsoColors && ev.n.alsoColors.length ? html`<div class="marks">${ev.n.alsoColors.map(c => html`<span class="mark" style=${`background:${c}`}></span>`)}</div>` : nothing}
         </div>`;
       });
 
       const nowLine = this._nowLineForDay(d);
 
       const wx = this._renderWeatherBand(date);
+
+      // Background grid lines: minor at slot_minutes, major at 60min
+      const minor = Math.round((Number(this._config.slot_minutes) || 30) * (Number(this._config.px_per_min) || 1.6));
+      const major = Math.round(60 * (Number(this._config.px_per_min) || 1.6));
+      const bgImage = `repeating-linear-gradient(to bottom, rgba(0,0,0,.08) 0, rgba(0,0,0,.08) 1px, transparent 1px, transparent ${minor}px),
+                       repeating-linear-gradient(to bottom, rgba(0,0,0,.18) 0, rgba(0,0,0,.18) 1px, transparent 1px, transparent ${major}px)`;
 
       out.push(html`
         <div class="col" style=${`grid-column:${2 + d}/${3 + d}`}>
@@ -947,7 +995,7 @@ export class MultiCalendarGridCard extends LitElement {
             ${wx}
           </div>
           ${allDay}
-          <div class="body" style=${`height:${columnHeight}px; position:relative; ${bodyBg ? `background:${bodyBg}` : ""}`}>${timed}${nowLine}</div>
+          <div class="body" style=${`height:${columnHeight}px; position:relative; ${bodyBg ? `background-color:${bodyBg};` : ""} background-image:${bgImage};`}>${timed}${nowLine}</div>
         </div>
       `);
     }
@@ -1010,7 +1058,7 @@ export class MultiCalendarGridCard extends LitElement {
       <div class="row"><strong>${ev.summary}</strong></div>
       <div class="row">${this._fmtRange(ev.s, ev.e, ev.allDay)}</div>
       ${ev.location ? html`<div class="row">${ev.location}</div>` : nothing}
-      ${ev.description ? html`<div class="row">${ev.description}</div>` : nothing}
+      ${ev.description ? html`<div class="row">${stripMarkup(ev.description)}</div>` : nothing}
     `;
 
     if ((customElements as any).get("ha-dialog")) {
@@ -1043,6 +1091,20 @@ function hash(s: string): string {
   let t = 5381;
   for (let i = 0; i < s.length; i++) t = (t * 33) ^ s.charCodeAt(i);
   return (t >>> 0).toString(36);
+}
+
+function stripMarkup(s?: string): string {
+  if (!s) return "";
+  let t = String(s);
+  // Remove HTML tags
+  t = t.replace(/<[^>]*>/g, "");
+  // Decode a few common HTML entities
+  t = t.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  // Strip simple Markdown decorations
+  t = t.replace(/\*\*|__|\*|_|~~|`+/g, "");
+  // Convert markdown links [text](url) -> text
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+  return t.trim();
 }
 
 /** Define element (no decorator) and card registration */
