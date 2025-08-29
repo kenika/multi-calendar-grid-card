@@ -605,6 +605,7 @@ export class MultiCalendarGridCard extends LitElement {
       const pad = Math.round(
         body.getBoundingClientRect().top - col.getBoundingClientRect().top
       );
+
       if (pad !== this._timeColPad) {
         this._timeColPad = pad;
         this.requestUpdate();
