@@ -1,6 +1,6 @@
 /* Multi-Calendar Grid Card
- * Native weather headers + start_today logic
- * Version: 0.8.0-dev.6 (static-editor import; soft setConfig; improved Today highlight; no Today pill)
+ * Weather headers + rolling 7-day view
+ * Version: 0.8.0-dev.7
  */
 
 import { LitElement, css, html, nothing } from "lit";
@@ -21,8 +21,8 @@ export type MultiCalendarGridCardConfig = {
   entities: EntityCfg[];
 
   /** TIME GRID */
-  first_day?: number | "today"; // kept for backwards-compat; see start_today
-  start_today?: boolean;        // NEW: defaults true; start 7-day window at "today"
+  first_day?: number | "today";
+  start_today?: boolean;        // default true
   slot_min_time?: string;       // "07:00:00"
   slot_max_time?: string;       // "22:00:00"
   slot_minutes?: number;        // 30..180
@@ -43,7 +43,11 @@ export type MultiCalendarGridCardConfig = {
   /** WEATHER */
   weather_entity?: string;
   weather_days?: number;      // default 7
-  weather_compact?: boolean;  // (placeholder, future formatting toggle)
+  weather_compact?: boolean;  // (placeholder)
+
+  /** HIGHLIGHTS */
+  highlight_today?: boolean;     // NEW: default true
+  highlight_weekends?: boolean;  // NEW: default true
 };
 
 const DEFAULTS: Required<Pick<
@@ -61,6 +65,8 @@ const DEFAULTS: Required<Pick<
   | "px_per_min"
   | "storage_key"
   | "start_today"
+  | "highlight_today"
+  | "highlight_weekends"
 >> = {
   slot_min_time: "07:00:00",
   slot_max_time: "22:00:00",
@@ -74,7 +80,9 @@ const DEFAULTS: Required<Pick<
   data_refresh_minutes: 5,
   px_per_min: 1.6,
   storage_key: `${CARD_TAG}.weekOffset`,
-  start_today: true, // NEW default
+  start_today: true,
+  highlight_today: true,
+  highlight_weekends: true,
 };
 
 const STRINGS = {
@@ -82,7 +90,6 @@ const STRINGS = {
     prev: "Prev",
     next: "Next",
     today: "Today",
-    today_pill: "Today",
     no_events: "No events in this range.",
     event_details: "Event details",
     close: "Close",
@@ -125,11 +132,15 @@ const sameYMD = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() &&
   a.getMonth() === b.getMonth() &&
   a.getDate() === b.getDate();
+const isWeekend = (d: Date) => {
+  const dow = d.getDay();
+  return dow === 0 || dow === 6;
+};
 
 const colorToHex = (raw?: string) => {
   const t = String(raw || "").trim();
   if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(t)) return t.toLowerCase();
-  if (/^rgba?\(/.test(t) || /^var\(--/.test(t)) return null; // cannot hex
+  if (/^rgba?\(/.test(t) || /^var\(--/.test(t)) return null;
   return "#3366cc";
 };
 const fgOn = (hex: string) => {
@@ -362,10 +373,12 @@ export class MultiCalendarGridCard extends LitElement {
     :host{display:block}
     ha-card{border-radius:16px; overflow:hidden}
     .hdr{display:flex; justify-content:space-between; align-items:center; gap:14px; margin:12px}
-    .legend{display:flex; gap:12px; flex-wrap:wrap; font-size:14px}
-    .legend .item{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; padding:6px 10px; border-radius:999px}
-    .legend .dot{width:14px; height:14px; border-radius:50%; display:inline-block}
-    .legend .inactive{opacity:0.4; filter:grayscale(0.2)}
+    /* LEGEND as full-color buttons */
+    .legend{display:flex; gap:8px; flex-wrap:wrap; font-size:14px}
+    .legend .btn{all:unset; cursor:pointer; padding:6px 12px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; gap:8px}
+    .legend .btn.active{border-color:transparent}
+    .legend .name{font-weight:600}
+    .legend .dot{width:10px; height:10px; border-radius:50%}
     .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
     .toolbar button{all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06)}
     .toolbar button:focus{outline:2px solid var(--primary-color)}
@@ -375,8 +388,9 @@ export class MultiCalendarGridCard extends LitElement {
     .grid{position:relative; display:grid; grid-template-columns:70px repeat(7,1fr); gap:1px; background:var(--divider-color,#e0e0e0)}
     .col{background:var(--card-background-color,#fff); position:relative}
     .col.today{outline:2px solid var(--primary-color); outline-offset:-2px}
-    .col.today .dayhdr{ background: var(--secondary-background-color, rgba(0,0,0,.08)); border-bottom-color: var(--primary-color); }
-    .col.today .body{ background-image: linear-gradient(to bottom, rgba(0,0,0,.03), rgba(0,0,0,.03)); }
+    .col.today .dayhdr{ background: var(--mcg-today-bg, rgba(33,150,243,.10)); border-bottom-color: var(--primary-color); }
+    .col.today .body{ background-image: linear-gradient(to bottom, rgba(33,150,243,.06), rgba(33,150,243,.06)); }
+    .col.weekend:not(.today) .dayhdr{ background: var(--mcg-weekend-bg, rgba(0,0,0,.05)); }
     .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:2; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
     .allday{padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; border-bottom:1px solid var(--divider-color,#e0e0e0)}
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
@@ -419,12 +433,14 @@ export class MultiCalendarGridCard extends LitElement {
             name: states[e]?.attributes?.friendly_name || e,
             color: palette[i % palette.length],
           }))
-        : []; // allow empty preview
+        : [];
     return {
       type: `custom:${CARD_TAG}`,
       entities,
       ...DEFAULTS,
       start_today: true,
+      highlight_today: true,
+      highlight_weekends: true,
     };
   }
 
@@ -435,7 +451,7 @@ export class MultiCalendarGridCard extends LitElement {
 
   /** Config */
   setConfig(cfg: Partial<MultiCalendarGridCardConfig>) {
-    // Merge defaults first, then validate (so YAML may omit times). Allow empty entities for first-use.
+    // Merge defaults first, then validate (so YAML may omit times). Allow empty entities.
     const merged: MultiCalendarGridCardConfig = {
       ...DEFAULTS,
       ...cfg,
@@ -449,7 +465,6 @@ export class MultiCalendarGridCard extends LitElement {
       throw new Error("slot_minutes must be a number between 1 and 180.");
     }
 
-    // Save merged config
     this._config = merged;
 
     // Namespace for localStorage
@@ -471,7 +486,7 @@ export class MultiCalendarGridCard extends LitElement {
     // Compute anchor (today by default)
     this._recomputeAnchor();
 
-    // Kick initial loads immediately (avoid relying only on updated())
+    // Kick initial loads immediately
     this._fetchEvents();
     this._loadWeather();
   }
@@ -529,7 +544,7 @@ export class MultiCalendarGridCard extends LitElement {
     if (cfg.start_today !== false || cfg.first_day === "today" || (cfg as any).first_day === -1) {
       base = startOfDay(today);
     } else {
-      const first = typeof cfg.first_day === "number" ? cfg.first_day : 1; // default Monday
+      const first = typeof cfg.first_day === "number" ? cfg.first_day : 1;
       base = startOfWeek(today, first);
     }
     base.setDate(base.getDate() + this._weekOffset * 7);
@@ -608,6 +623,7 @@ export class MultiCalendarGridCard extends LitElement {
     this._error = null;
 
     const start = new Date(this._weekAnchor);
+    theEND:
     const end = addMinutes(start, 7 * 24 * 60);
     const startIso = start.toISOString();
     const endIso = end.toISOString();
@@ -615,7 +631,15 @@ export class MultiCalendarGridCard extends LitElement {
     const all: any[] = [];
     const failed: string[] = [];
 
+    // Legend active state
+    const activeMapKey = `${this._nsBase}.legend`;
+    let activeMap: Record<string, boolean> = {};
+    try {
+      activeMap = JSON.parse(localStorage.getItem(activeMapKey) || "{}") || {};
+    } catch {}
+
     for (const ent of this._config.entities) {
+      if (activeMap[ent.entity] === false) continue; // respect legend filter
       const path = `calendars/${ent.entity}?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(
         endIso
       )}`;
@@ -738,7 +762,7 @@ export class MultiCalendarGridCard extends LitElement {
       const same = s.toDateString() === e.toDateString();
       const endAdj = new Date(e.getFullYear(), e.getMonth(), e.getDate());
       endAdj.setMilliseconds(-1);
-      return same ? `${fmt.format(s)}` : `${fmt.format(s)} → ${fmt.format(endAdj)}`;
+      return same ? `${fmt.format(s)}` : `${fmt.format(endAdj)}`;
     }
     const cycle = loc?.time_format === "12" ? "h12" : "h23";
     const tf = new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit", hourCycle: cycle });
@@ -815,11 +839,15 @@ export class MultiCalendarGridCard extends LitElement {
       this.requestUpdate();
     };
 
-    const dot = e.color ? (colorToHex(e.color) ? e.color! : e.color!) : "#3366cc";
-    return html`<div class=${active ? "item" : "item inactive"} @click=${toggle}>
-      <span class="dot" style=${`background:${dot}`}></span>
-      <span>${e.name || e.entity}</span>
-    </div>`;
+    const hex = colorToHex(e.color || "#3366cc") || "#3366cc";
+    const fg = fgOn(hex);
+    const styleActive = `background:${hex}; color:${fg}`;
+    const styleInactive = `background:transparent; color:var(--primary-text-color,#111)`;
+
+    return html`<button class="btn ${active ? "active" : ""}" style=${active ? styleActive : styleInactive} @click=${toggle}>
+      <span class="dot" style=${`background:${hex}`}></span>
+      <span class="name">${e.name || e.entity}</span>
+    </button>`;
   }
 
   private _timeColumn() {
@@ -843,10 +871,13 @@ export class MultiCalendarGridCard extends LitElement {
     const pxPerMin = Number(this._config.px_per_min) || DEFAULTS.px_per_min;
     const columnHeight = Math.round(1440 * pxPerMin);
     const today = startOfDay(new Date());
+    const showToday = this._config.highlight_today !== false;
+    const showWeekends = this._config.highlight_weekends !== false;
 
     for (let d = 0; d < 7; d++) {
       const date = addMinutes(start, d * 24 * 60);
-      const isToday = sameYMD(date, today);
+      const isToday = showToday && sameYMD(date, today);
+      const weekend = showWeekends && isWeekend(date);
       const day = this._days[d];
       const lang = this._lang();
       const label = date.toLocaleDateString(lang, { weekday: "short", day: "2-digit", month: "short" });
@@ -888,8 +919,8 @@ export class MultiCalendarGridCard extends LitElement {
       const wx = this._renderWeatherBand(date);
 
       out.push(html`
-        <div class=${isToday ? "col today" : "col"} style=${`grid-column:${2 + d}/${3 + d}`}>
-          <div class=${isToday ? "dayhdr today" : "dayhdr"}>
+        <div class=${`col ${isToday ? "today" : ""} ${weekend ? "weekend" : ""}`} style=${`grid-column:${2 + d}/${3 + d}`}>
+          <div class="dayhdr">
             <div>${label}</div>
             ${wx}
           </div>
@@ -906,7 +937,7 @@ export class MultiCalendarGridCard extends LitElement {
   private _renderWeatherBand(date: Date) {
     const k = dayKey(date);
     const d = this._wxByKey.get(k);
-    if (!d) return html`<div class="mcg-wx" data-native></div>`; // keep space stable
+    if (!d) return html`<div class="mcg-wx" data-native></div>`;
 
     const unit = this._wxUnit || "°";
     const hi = d.hi != null ? `${Math.round(d.hi)}${unit}` : "–";
