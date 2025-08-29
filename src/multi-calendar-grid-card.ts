@@ -460,11 +460,16 @@ export class MultiCalendarGridCard extends LitElement {
     };
   }
 
-  static getConfigElement() {
-    // Only return the editor if the custom element is registered; otherwise provide a safe fallback.
-    if (customElements.get("multi-calendar-grid-card-editor")) {
-      return document.createElement("multi-calendar-grid-card-editor");
+  static async getConfigElement() {
+    if (!customElements.get("multi-calendar-grid-card-editor")) {
+      try { await import("./editor/multi-calendar-grid-card-editor"); } catch {}
+      try { await customElements.whenDefined("multi-calendar-grid-card-editor"); } catch {}
     }
+    const el = document.createElement("multi-calendar-grid-card-editor");
+    // Safety: provide a no-op setConfig until upgrade completes
+    if (!(el as any).setConfig) { (el as any).setConfig = function(_: any) {}; }
+    return el;
+  }
     const el = document.createElement("div");
     el.innerHTML = `<div style="padding:8px">UI editor is loading… if it doesn't appear, use YAML for now.</div>`;
     return el;
