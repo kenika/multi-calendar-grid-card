@@ -623,7 +623,6 @@ export class MultiCalendarGridCard extends LitElement {
     this._error = null;
 
     const start = new Date(this._weekAnchor);
-    theEND:
     const end = addMinutes(start, 7 * 24 * 60);
     const startIso = start.toISOString();
     const endIso = end.toISOString();
