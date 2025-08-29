@@ -385,7 +385,6 @@ export class MultiCalendarGridCard extends LitElement {
     .legend .btn{all:unset; cursor:pointer; padding:8px 14px; border-radius:999px; border:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:center; gap:8px; text-align:center}
     .legend .btn.active{border-color:transparent}
     .legend .name{font-weight:600}
-    .badge{border-radius:999px; padding:5px 14px; font-size:13px; background:var(--secondary-background-color, rgba(0,0,0,0.06)); color:var(--primary-text-color,#111)}
     .toolbar button{all:unset; cursor:pointer; padding:7px 14px; border-radius:999px; background:rgba(0,0,0,.06)}
     .toolbar button:focus{outline:2px solid var(--primary-color)}
     .error{color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; font-size:12px; margin:0 12px 8px}
@@ -600,9 +599,13 @@ export class MultiCalendarGridCard extends LitElement {
   }
 
   private _measureTimeColPad() {
-    const body = this.renderRoot?.querySelector(".col .body") as HTMLElement | null;
-    if (body) {
-      const pad = body.offsetTop;
+    const col = this.renderRoot?.querySelector(".col") as HTMLElement | null;
+    const body = col?.querySelector(".body") as HTMLElement | null;
+    if (col && body) {
+      const pad = Math.round(
+        body.getBoundingClientRect().top - col.getBoundingClientRect().top
+      );
+
       if (pad !== this._timeColPad) {
         this._timeColPad = pad;
         this.requestUpdate();
@@ -857,9 +860,7 @@ export class MultiCalendarGridCard extends LitElement {
 
   render() {
     const start = this._weekAnchor;
-    const end = addMinutes(new Date(start), (this._config.visible_days || 7) * 24 * 60 - 1);
     const lang = this._lang();
-    const rf = new Intl.DateTimeFormat(lang, { day: "2-digit", month: "short" });
     const vh = Number(this._config.height_vh || DEFAULTS.height_vh);
 
     return html`
@@ -867,9 +868,6 @@ export class MultiCalendarGridCard extends LitElement {
         <div class="hdr">
           <div class="legend">
             ${this._config.entities.map((e) => this._legendItem(e))}
-          </div>
-          <div class="badge" title="${this._error ? this._error : ""}">
-            ${rf.format(start)} – ${rf.format(end)}
           </div>
           <div class="toolbar">
             <button type="button" aria-label="${tr(lang, "aria_prev_week")}" @click=${() => this._shiftWeek(-1)}>${tr(
