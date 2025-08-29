@@ -201,7 +201,8 @@ export class MultiCalendarGridCardEditor extends LitElement {
               @input=${(ev: any) => this._updateEntity(i, { name: ev.target.value })}
             />
             <button class="color-btn" style=${`--clr:${colorVal}`} @click=${(ev: any) => {
-              const inp: HTMLInputElement | null = ev.currentTarget?.parentElement?.querySelector('input[type="color"]');
+              const parentEl = (ev.currentTarget as HTMLElement).parentElement;
+              const inp: HTMLInputElement | null = parentEl ? (parentEl.querySelector('input[type="color"]') as HTMLInputElement | null) : null;
               if (inp) inp.click();
             }}>Color</button>
             <input type="color" class="color" .value=${colorVal} @input=${(ev: any) => this._updateEntity(i, { color: ev.target.value })} />
@@ -298,7 +299,8 @@ export class MultiCalendarGridCardEditor extends LitElement {
             this._updateConfig({ [key]: ev.target.checked ? "" : hex } as any);
           }} /> None</label>
           <button class="color-btn big" style=${`--clr:${hex}`} ?disabled=${none} @click=${(ev: any) => {
-            const inp: HTMLInputElement | null = (ev.currentTarget as HTMLElement).parentElement?.querySelector('input[type="color"]');
+            const parentEl2 = (ev.currentTarget as HTMLElement).parentElement;
+            const inp: HTMLInputElement | null = parentEl2 ? (parentEl2.querySelector('input[type="color"]') as HTMLInputElement | null) : null;
             if (inp) inp.click();
           }}>Pick color</button>
           <input type="color" class="color" .value=${hex} ?disabled=${none} @input=${(ev: any) => this._updateConfig({ [key]: ev.target.value } as any)} />
