@@ -202,16 +202,14 @@ export class MultiCalendarGridCardEditor extends LitElement {
 
   render() {
     const ents = this._config.entities || [];
-    const minTime = (this._config.slot_min_time || DEFAULTS.slot_min_time).slice(0,5);
-    const maxTime = (this._config.slot_max_time || DEFAULTS.slot_max_time).slice(0,5);
-    const reachedMax = ents.length >= MAX_CALENDARS;
+        const reachedMax = ents.length >= MAX_CALENDARS;
     const tf = this._safe(this._config.time_format, DEFAULTS.time_format);
 
     return html`
       <div class="wrap">
         ${this._calendarsSection(ents, reachedMax)}
         ${this._weatherSection()}
-        ${this._gridSection(minTime, maxTime)}
+        ${this._gridSection()}
         ${this._timeFormatSection(tf)}
         ${this._highlightsSection()}
         ${this._behaviorSection()}
@@ -293,7 +291,7 @@ export class MultiCalendarGridCardEditor extends LitElement {
     `;
   }
 
-  private _gridSection(minTime: string, maxTime: string) {
+  private _gridSection() {
     const tf = this._safe(this._config.time_format, DEFAULTS.time_format) as ("12" | "24");
     return html`
       <div class="section">
