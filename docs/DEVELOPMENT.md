@@ -11,8 +11,7 @@
 
 ```bash
 npm ci
-npm run lint       # ESLint (no warnings allowed)
-npm run check      # tsc --noEmit
+npm test           # run lint + type-check
 npm run build      # bundle for HA
 ```
 

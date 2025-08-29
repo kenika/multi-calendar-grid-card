@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0
+- Consolidated `npm test` script for linting and type-checking
+- Version aligned with card's 0.8.0 release
+
 ## 0.8.0-dev.12
 - Stable UI editor for common options (entities, weather, focus window, height).
 - Robust native weather in headers (HA strategies + aggregation for hourly).

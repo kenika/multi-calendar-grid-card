@@ -1,6 +1,6 @@
 {
   "name": "multi-calendar-grid-card",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Home Assistant Lovelace card: Multi-Calendar Grid Card (Lit + TypeScript)",
   "private": true,
   "type": "module",
@@ -20,6 +20,7 @@
     "build": "esbuild ./src/multi-calendar-grid-card.ts --bundle --minify --sourcemap --outfile=./dist/multi-calendar-grid-card.js",
     "check": "tsc --noEmit",
     "lint": "eslint \"src/**/*.{ts,js}\" --max-warnings=0",
+    "test": "npm run check && npm run lint",
     "format": "prettier --write ."
   },
   "devDependencies": {
