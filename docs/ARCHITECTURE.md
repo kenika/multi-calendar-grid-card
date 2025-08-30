@@ -13,7 +13,7 @@
 1. **Rendering (LitElement)**
    - Header toolbar (legend and navigation)
    - Sticky day headers (date + weather)
-   - All‑day row
+   - All‑day events overlay
    - Time grid body (00:00–24:00); events positioned using minute offsets
 
 2. **Data fetchers**
