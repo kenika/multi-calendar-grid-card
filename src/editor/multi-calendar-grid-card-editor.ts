@@ -1,5 +1,5 @@
 /* Multi-Calendar Grid Card – Visual Editor
- * v0.8.0-dev.12 — compact hints; calendar blocks; visible days; time pickers; 12/24h
+ * v0.8.0-dev.19 — compact hints; calendar blocks; visible days; time pickers; 12/24h
  */
 import { LitElement, css, html, nothing } from "lit";
 

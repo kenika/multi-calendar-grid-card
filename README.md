@@ -2,7 +2,7 @@
 
 A compact, **7‑day** time‑grid view that overlays multiple Home Assistant calendar entities on a single card. Built with **Lit + TypeScript** as a single custom element: `multi-calendar-grid-card`.
 
-> **This document reflects the `v0.8.0-dev.12` baseline** (the last known good UX prior to later experimental changes).
+> **This document reflects the `v0.8.0-dev.19` baseline** (the last known good UX prior to later experimental changes).
 
 ---
 
@@ -22,16 +22,18 @@ A compact, **7‑day** time‑grid view that overlays multiple Home Assistant ca
 ## Installation
 
 1. Copy the built JS bundle to your HA `www` directory, e.g.:
-   - Dev: `/local/dev/multi-calendar-grid-card-dev12.js`
+   - Dev: `/local/dev/multi-calendar-grid-card-0.8.0-dev19.js`
    - Prod: `/local/multi-calendar-grid-card/multi-calendar-grid-card.js`
 2. In **Settings → Dashboards → Resources**, add:
    ```yaml
-   url: /local/dev/multi-calendar-grid-card-dev12.js
+   url: /local/dev/multi-calendar-grid-card-0.8.0-dev19.js
    type: module
    ```
 3. Refresh your dashboard (Shift+Reload).
 
 > You can keep both a dev and prod resource and toggle which one is enabled.
+
+> Need a smaller bundle? Build with `SOURCEMAP=false` (or `--no-sourcemap`) to skip generating the `.map` file.
 
 ---
 
@@ -89,7 +91,7 @@ Low/high, icon, and (if available) precipitation chance are shown per day.
 
 ---
 
-## Lovelace UI editor (dev.12)
+## Lovelace UI editor (dev.19)
 
 A simple editor is available to set common options **without editing YAML**:
 - Manage calendars (entity, display name, color)
