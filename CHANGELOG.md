@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0-dev.16
+- Prevent crash when day data is missing for all-day events.
+- Offset time column for all-day overlay so the scale starts beneath the header.
+
 ## 0.8.0-dev.15
 - Keep all-day events visible while scrolling and color them like timed events.
 - Fix focus window scroll offset so the first visible hour starts below the header.
