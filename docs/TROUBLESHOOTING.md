@@ -2,6 +2,7 @@
 
 > Baseline: **v0.8.0-dev.19**
 
+
 ## “Unknown card type encountered ‘multi-calendar-grid-card’”
 The resource isn’t loaded. Add the module under **Settings → Dashboards → Resources**, or fix the URL.
 
@@ -32,3 +33,5 @@ Fixed in dev.15. Full-day events now stick below the header and use their calend
 ## Dashboard becomes unresponsive or blank
 Fixed in dev.19. Rendering now guards against missing day data.
 
+
+Fixed in dev.14. All-day events overlay the grid, and the time column automatically pads to match the header height.
