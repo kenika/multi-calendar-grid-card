@@ -7,6 +7,18 @@
 - Node 18+
 - PNPM or NPM
 
+## Branch workflow
+
+Start new work from the `dev` branch:
+
+```bash
+git checkout dev
+git pull origin dev
+git checkout -b feature/<topic>
+```
+
+Push the feature branch and open a pull request back to `dev`. Avoid using the deprecated `work` branch or the **Update branch** button unless the branch is behind.
+
 ## Scripts
 
 ```bash

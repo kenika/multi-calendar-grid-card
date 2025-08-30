@@ -6,6 +6,13 @@ A compact, **7‑day** time‑grid view that overlays multiple Home Assistant ca
 
 ---
 
+## Branches
+
+- `main`: stable releases.
+- `dev`: active development. Create feature branches from `dev` and open pull requests back to it. Avoid using the deprecated `work` branch.
+
+---
+
 ## Features
 
 - **Rolling 7‑day window** starting **today** by default (`start_today: true`).
