@@ -2,6 +2,7 @@
 
 > Baseline: **v0.8.0-dev.15**
 
+
 ## “Unknown card type encountered ‘multi-calendar-grid-card’”
 The resource isn’t loaded. Add the module under **Settings → Dashboards → Resources**, or fix the URL.
 
@@ -29,3 +30,5 @@ Fixed in dev.14. All-day events overlay the grid, and the time column automatica
 ## All-day events disappear when scrolling
 Fixed in dev.15. Full-day events now stick below the header and use their calendar colors; the focus window also starts beneath this area.
 
+
+Fixed in dev.14. All-day events overlay the grid, and the time column automatically pads to match the header height.

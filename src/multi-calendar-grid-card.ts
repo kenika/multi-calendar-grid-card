@@ -395,6 +395,7 @@ export class MultiCalendarGridCard extends LitElement {
     .col{background:var(--card-background-color,#fff); position:relative}
     .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:5; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
     .allday{position:sticky; left:0; right:0; padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px; background:var(--card-background-color,#fff); z-index:3}
+
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .timecol{background:var(--card-background-color,#fff); position:relative}
     .timecol .ticks{position:relative}
@@ -1016,6 +1017,7 @@ export class MultiCalendarGridCard extends LitElement {
                   : nothing}
               </div>`;
             })}
+
           </div>`
         : nothing;
 
