@@ -1,6 +1,6 @@
 # Troubleshooting
 
-> Baseline: **v0.8.0-dev.18**
+> Baseline: **v0.8.0-dev.19**
 
 
 ## “Unknown card type encountered ‘multi-calendar-grid-card’”
@@ -30,9 +30,8 @@ Fixed in dev.18. The time column now accounts for the uniform all-day spacer.
 ## All-day events disappear when scrolling
 Fixed in dev.15. Full-day events now stick below the header and use their calendar colors; the focus window also starts beneath this area.
 
-
-## All-day events disappear when scrolling
-Fixed in dev.15. Full-day events now stick below the header and use their calendar colors; the focus window also starts beneath this area.
+## Dashboard becomes unresponsive or blank
+Fixed in dev.19. Rendering now guards against missing day data.
 
 
 Fixed in dev.14. All-day events overlay the grid, and the time column automatically pads to match the header height.

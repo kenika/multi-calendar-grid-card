@@ -1,8 +1,15 @@
 # Changelog
 
+## 0.8.0-dev.19
+- Guard day columns against missing data to avoid blank card or runtime crash.
+
+## 0.8.0-dev.18
+- Reserve a uniform spacer for all-day events and align the time column beneath it.
+
 ## 0.8.0-dev.17
 - Anchor all-day overlay at the top so it no longer shifts the grid or freezes the dashboard.
 - Start the time scale beneath the header and all-day area without crashing.
+
 
 ## 0.8.0-dev.18
 - Reserve a uniform spacer for all-day events and align the time column beneath it.

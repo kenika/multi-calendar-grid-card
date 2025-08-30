@@ -563,7 +563,6 @@ export class MultiCalendarGridCard extends LitElement {
     const minMin = toMinutes(this._config.slot_min_time!);
     const pxPerMin = this._pxPerMin();
     const defaultTop = Math.max(0, Math.round(minMin * pxPerMin)); // align to exact minute, no fudge
-
     let top = defaultTop;
     if (this._config.remember_offset) {
       try {
@@ -991,7 +990,7 @@ export class MultiCalendarGridCard extends LitElement {
       const date = addMinutes(start, d * 24 * 60);
       const isToday = sameYMD(date, today);
       const isWknd = isWeekend(date);
-      const day = this._days[d];
+      const day = this._days?.[d];
       const lang = this._lang();
       const label = date.toLocaleDateString(lang, { weekday: "short", day: "2-digit", month: "short" });
 
@@ -1021,7 +1020,6 @@ export class MultiCalendarGridCard extends LitElement {
               })}
             </div>`
           : nothing;
-
 
       const timed = (day?.timed || []).map((ev) => {
         const top = Math.round(ev.top * pxPerMin);
