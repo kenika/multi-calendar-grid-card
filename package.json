@@ -21,7 +21,8 @@
     "check": "tsc --noEmit",
     "lint": "eslint \"src/**/*.{ts,js}\" --max-warnings=0",
     "format": "prettier --write .",
-    "test": "tsx --test src/aggregateHourlyToDaily.test.ts"
+    "test": "tsx --test src/aggregateHourlyToDaily.test.ts",
+    "rename": "node scripts/rename-dist.mjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.41.0",
