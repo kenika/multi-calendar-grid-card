@@ -5,7 +5,6 @@ import { build } from 'esbuild';
 let outfileArg;
 let versionArg;
 let sourcemap = true;
-
 for (const arg of process.argv.slice(2)) {
   if (arg.startsWith('--outfile=')) {
     outfileArg = arg.slice('--outfile='.length);
