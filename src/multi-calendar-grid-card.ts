@@ -963,6 +963,7 @@ export class MultiCalendarGridCard extends LitElement {
     const pad = this._timeColPad + this._allDayHeight;
     return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative;">
       <div class="ticks" style=${`height:${columnHeight}px;margin-top:${pad}px`}>${ticks}</div>
+
     </div>`;
   }
 
