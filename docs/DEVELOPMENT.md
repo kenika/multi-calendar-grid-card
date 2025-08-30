@@ -7,19 +7,6 @@
 - Node 18+
 - PNPM or NPM
 
-## Branch workflow
-
-- Base all work off the `dev` branch.
-- Before starting changes, sync with upstream:
-  `git fetch` and `git rebase origin/dev` (or merge).
-- Create a topic branch for each change:
-  `git checkout -b feature/<topic>`.
-- Commit and push: `git push -u origin feature/<topic>` then open a PR
-  into `dev`.
-- Enable auto-merge (or merge manually) once checks pass.
-- Skip the **Update branch** button unless `dev` has moved ahead and you
-  need the latest commits.
-
 ## Scripts
 
 ```bash
@@ -29,25 +16,15 @@ npm run check      # tsc --noEmit
 npm run build      # bundle for HA
 ```
 
-## Git workflow
+## Branch workflow
 
-- `dev` is the active development branch; `main` tracks stable releases.
-- Start new work from the latest `dev` and use short‑lived feature branches:
-
-  ```bash
-  git checkout dev
-  git pull
-  git checkout -b feature/<topic>
-  ```
-
-- Push the branch and open a pull request back into `dev`:
-
-  ```bash
-  git push -u origin feature/<topic>
-  ```
-
-- Enable auto‑merge on the PR. Avoid the **Update branch** button; if `dev` moves ahead, rebase or merge locally and push again.
-- The former `work` branch has been removed in favor of this workflow.
+- Base all work off the `dev` branch.
+- Before starting changes, sync with upstream: `git fetch` and `git rebase origin/dev` (or merge).
+- Create a topic branch for each change: `git checkout -b feature/<topic>`.
+- Commit and push: `git push -u origin feature/<topic>` then open a PR into `dev`.
+- Enable auto-merge (or merge manually) once checks pass.
+- Skip the **Update branch** button unless `dev` has moved ahead and you need the latest commits.
+- The legacy `work` branch has been removed; use short-lived feature branches instead.
 
 ## Linting rules
 
