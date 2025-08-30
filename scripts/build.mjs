@@ -1,15 +1,25 @@
 import { mkdir } from 'node:fs/promises';
 import { build } from 'esbuild';
 
-// Parse CLI args for --outfile and --define:__VERSION__
+// Parse CLI args for --outfile, --define:__VERSION__, and --no-sourcemap
 let outfileArg;
 let versionArg;
+let sourcemap = true;
+
 for (const arg of process.argv.slice(2)) {
   if (arg.startsWith('--outfile=')) {
     outfileArg = arg.slice('--outfile='.length);
   } else if (arg.startsWith('--define:__VERSION__=')) {
     versionArg = arg.slice('--define:__VERSION__='.length);
+  } else if (arg === '--no-sourcemap' || arg === '--sourcemap=false') {
+    sourcemap = false;
   }
+}
+
+// Allow disabling sourcemaps via env var
+const envSourcemap = process.env.SOURCEMAP;
+if (envSourcemap === 'false' || envSourcemap === '0') {
+  sourcemap = false;
 }
 
 const envName = process.env.BUILD_NAME;
@@ -30,7 +40,7 @@ await build({
   entryPoints: ['./src/multi-calendar-grid-card.ts'],
   bundle: true,
   minify: true,
-  sourcemap: true,
+  sourcemap,
   outfile,
   define: Object.keys(define).length ? define : undefined,
 });

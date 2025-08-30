@@ -25,12 +25,14 @@ npm run build      # bundle for HA
 ## Local testing in HA
 
 1. Build with a versioned name (the `.map` will match automatically):
-
    ```bash
    BUILD_NAME=multi-calendar-grid-card-0.8.0-dev19 npm run build
    ```
+   To skip generating source maps, add `SOURCEMAP=false` or pass `--no-sourcemap`:
+   ```bash
+   BUILD_NAME=multi-calendar-grid-card-0.8.0-dev19 SOURCEMAP=false npm run build
+   ```
 2. If you rename an existing build later, rename the map too:
-
    ```bash
    npm run rename -- multi-calendar-grid-card-0.8.0-dev19.js
    ```
@@ -38,7 +40,7 @@ npm run build      # bundle for HA
 4. Add a **Resource** pointing to `/local/dev/multi-calendar-grid-card-0.8.0-dev19.js` (type `module`).
 5. In a test view, add the card via YAML (see README examples).
 6. Shift+Reload the dashboard after each build (or clear cache).
-7. 
+
 ## Release hygiene
 
 - Update `CHANGELOG.md`

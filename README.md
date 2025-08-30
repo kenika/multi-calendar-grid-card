@@ -33,6 +33,8 @@ A compact, **7‑day** time‑grid view that overlays multiple Home Assistant ca
 
 > You can keep both a dev and prod resource and toggle which one is enabled.
 
+> Need a smaller bundle? Build with `SOURCEMAP=false` (or `--no-sourcemap`) to skip generating the `.map` file.
+
 ---
 
 ## Configuration (YAML)
