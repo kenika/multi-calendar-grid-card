@@ -562,7 +562,8 @@ export class MultiCalendarGridCard extends LitElement {
   private _restoreScroll() {
     const minMin = toMinutes(this._config.slot_min_time!);
     const pxPerMin = this._pxPerMin();
-    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin - this._allDayHeight)); // align to exact minute, no fudge
+    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin)); // align to exact minute, no fudge
+
     let top = defaultTop;
     if (this._config.remember_offset) {
       try {
@@ -960,7 +961,7 @@ export class MultiCalendarGridCard extends LitElement {
         ticks.push(html`<div class="hour-label" style=${`top:${top - 8}px`}>${label}</div>`);
       }
     }
-    const pad = this._timeColPad + this._allDayHeight;
+    const pad = this._timeColPad;
     return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative;">
       <div class="ticks" style=${`height:${columnHeight}px;margin-top:${pad}px`}>${ticks}</div>
     </div>`;
@@ -998,26 +999,29 @@ export class MultiCalendarGridCard extends LitElement {
       let bodyBg = "";
       if (isToday && todayColor) { headerBg = todayColor; bodyBg = todayColor; }
       else if (isWknd && weekendColor) { headerBg = weekendColor; bodyBg = weekendColor; }
-      const allDayStyle = `top:0;${
-        this._allDayHeight ? `height:${this._allDayHeight}px;margin-bottom:-${this._allDayHeight}px` : ""
-      }`;
-      const allDay = this._config.show_all_day
-        ? html`<div class="allday" style=${allDayStyle}>
-            ${(day?.allDay || []).map((ev) => {
-              const hex = colorToHex(ev.color || "#3366cc") || "#3366cc";
-              const fg = fgOn(hex);
-              return html`<div
-                class="pill"
-                style=${`background:${hex};color:${fg};border:1px solid ${hex}`}
-                @click=${() => this._open(ev)}
-              >${ev.summary}
-                ${ev.alsoColors && ev.alsoColors.length
-                  ? html`<span style="margin-left:6px; display:inline-flex; gap:3px; vertical-align:middle;">${ev.alsoColors.map(c => html`<span style="width:8px;height:8px;border-radius:2px;display:inline-block;box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;background:${c}"></span>`)}</span>`
-                  : nothing}
-              </div>`;
-            })}
-          </div>`
-        : nothing;
+
+        const headerHeight = Math.max(0, this._timeColPad - this._allDayHeight);
+        const allDayStyle = `top:${headerHeight}px;${
+          this._allDayHeight ? `height:${this._allDayHeight}px` : ""
+        }`;
+        const allDay = this._config.show_all_day
+          ? html`<div class="allday" style=${allDayStyle}>
+              ${(day?.allDay || []).map((ev) => {
+                const hex = colorToHex(ev.color || "#3366cc") || "#3366cc";
+                const fg = fgOn(hex);
+                return html`<div
+                  class="pill"
+                  style=${`background:${hex};color:${fg};border:1px solid ${hex}`}
+                  @click=${() => this._open(ev)}
+                >${ev.summary}
+                  ${ev.alsoColors && ev.alsoColors.length
+                    ? html`<span style="margin-left:6px; display:inline-flex; gap:3px; vertical-align:middle;">${ev.alsoColors.map((c) => html`<span style="width:8px;height:8px;border-radius:2px;display:inline-block;box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;background:${c}"></span>`)}</span>`
+                    : nothing}
+                </div>`;
+              })}
+            </div>`
+          : nothing;
+
 
       const timed = (day?.timed || []).map((ev) => {
         const top = Math.round(ev.top * pxPerMin);
@@ -1055,7 +1059,8 @@ export class MultiCalendarGridCard extends LitElement {
       `);
     }
 
-    const totalHeight = columnHeight + this._timeColPad + this._allDayHeight;
+    const totalHeight = columnHeight + this._timeColPad;
+
     out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr); height:${totalHeight}px}</style>`);
     return out;
   }
