@@ -360,6 +360,7 @@ export class MultiCalendarGridCard extends LitElement {
   private _refresh?: number;
   private _nsBase = "";
   private _timeColPad = 0;
+  private _allDayHeight = 0;
 
   /** Reactive properties (no decorators) */
   static properties = {
@@ -393,7 +394,8 @@ export class MultiCalendarGridCard extends LitElement {
     .grid{position:relative; display:grid; gap:1px; background:var(--divider-color,#e0e0e0)}
     .col{background:var(--card-background-color,#fff); position:relative}
     .dayhdr{position:sticky; top:0; background:var(--card-background-color,#fff); z-index:5; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--divider-color,#e0e0e0); display:flex; align-items:center; justify-content:space-between; gap:8px}
-    .allday{position:absolute; top:0; left:0; right:0; padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px 6px; background:var(--card-background-color,#fff); z-index:3}
+    .allday{position:sticky; left:0; right:0; padding:6px 8px; display:flex; flex-wrap:wrap; gap:6px; background:var(--card-background-color,#fff); z-index:3}
+
     .pill{background: var(--secondary-background-color, rgba(0,0,0,.08)); color: var(--primary-text-color,#111); border-radius:10px; padding:2px 8px; font-size:12px; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .timecol{background:var(--card-background-color,#fff); position:relative}
     .timecol .ticks{position:relative}
@@ -561,7 +563,7 @@ export class MultiCalendarGridCard extends LitElement {
   private _restoreScroll() {
     const minMin = toMinutes(this._config.slot_min_time!);
     const pxPerMin = this._pxPerMin();
-    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin + this._timeColPad)); // align to exact minute, no fudge
+    const defaultTop = Math.max(0, Math.round(minMin * pxPerMin - this._allDayHeight)); // align to exact minute, no fudge
     let top = defaultTop;
     if (this._config.remember_offset) {
       try {
@@ -606,10 +608,16 @@ export class MultiCalendarGridCard extends LitElement {
       const pad = Math.round(
         body.getBoundingClientRect().top - col.getBoundingClientRect().top
       );
+      const allHeights = Array.from(
+        this.renderRoot?.querySelectorAll(".allday") || []
+      ).map((el) => (el as HTMLElement).scrollHeight);
+      const allDayHeight = Math.max(0, ...allHeights);
 
-      if (pad !== this._timeColPad) {
+      if (pad !== this._timeColPad || allDayHeight !== this._allDayHeight) {
         this._timeColPad = pad;
+        this._allDayHeight = allDayHeight;
         this.requestUpdate();
+        this.updateComplete.then(() => this._restoreScroll());
       }
     }
   }
@@ -991,13 +999,25 @@ export class MultiCalendarGridCard extends LitElement {
       if (isToday && todayColor) { headerBg = todayColor; bodyBg = todayColor; }
       else if (isWknd && weekendColor) { headerBg = weekendColor; bodyBg = weekendColor; }
 
-      const allDay = this._config.show_all_day && (day?.allDay?.length)
-        ? html`<div class="allday">
-            ${(day.allDay || []).map(
-              (ev) => html`<div class="pill" @click=${() => this._open(ev)}>${ev.summary}
-              ${ev.alsoColors && ev.alsoColors.length ? html`<span style="margin-left:6px; display:inline-flex; gap:3px; vertical-align:middle;">${ev.alsoColors.map(c => html`<span style="width:8px;height:8px;border-radius:2px;display:inline-block;box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;background:${c}"></span>`)}</span>` : nothing}
-            </div>`
-            )}
+      const allDayStyle = `top:${this._timeColPad}px;${
+        this._allDayHeight ? `height:${this._allDayHeight}px;margin-bottom:-${this._allDayHeight}px` : ""
+      }`;
+      const allDay = this._config.show_all_day
+        ? html`<div class="allday" style=${allDayStyle}>
+            ${(day.allDay || []).map((ev) => {
+              const hex = colorToHex(ev.color || "#3366cc") || "#3366cc";
+              const fg = fgOn(hex);
+              return html`<div
+                class="pill"
+                style=${`background:${hex};color:${fg};border:1px solid ${hex}`}
+                @click=${() => this._open(ev)}
+              >${ev.summary}
+                ${ev.alsoColors && ev.alsoColors.length
+                  ? html`<span style="margin-left:6px; display:inline-flex; gap:3px; vertical-align:middle;">${ev.alsoColors.map(c => html`<span style="width:8px;height:8px;border-radius:2px;display:inline-block;box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;background:${c}"></span>`)}</span>`
+                  : nothing}
+              </div>`;
+            })}
+
           </div>`
         : nothing;
 

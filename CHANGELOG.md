@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0-dev.15
+- Keep all-day events visible while scrolling and color them like timed events.
+- Fix focus window scroll offset so the first visible hour starts below the header.
+
 ## 0.8.0-dev.14
 - Overlay all-day events on the grid and remove per-day spacer.
 - Fix all-day events incorrectly showing on the following day.
