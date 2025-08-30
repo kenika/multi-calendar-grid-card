@@ -563,6 +563,7 @@ export class MultiCalendarGridCard extends LitElement {
     const minMin = toMinutes(this._config.slot_min_time!);
     const pxPerMin = this._pxPerMin();
     const defaultTop = Math.max(0, Math.round(minMin * pxPerMin)); // align to exact minute, no fudge
+
     let top = defaultTop;
     if (this._config.remember_offset) {
       try {
@@ -1021,6 +1022,7 @@ export class MultiCalendarGridCard extends LitElement {
             </div>`
           : nothing;
 
+
       const timed = (day?.timed || []).map((ev) => {
         const top = Math.round(ev.top * pxPerMin);
         const height = Math.max(2, Math.round(ev.height * pxPerMin));
@@ -1052,13 +1054,13 @@ export class MultiCalendarGridCard extends LitElement {
             <div>${label}</div>
             ${wx}
           </div>
-          ${allDay}
-          <div class="body" style=${`height:${columnHeight}px; position:relative; ${bodyBg ? `background-color:${bodyBg};` : ""}`}>${gridLines}${timed}${nowLine}</div>
+          <div class="body" style=${`height:${columnHeight}px; position:relative; ${bodyBg ? `background-color:${bodyBg};` : ""}`}>${allDay}${gridLines}${timed}${nowLine}</div>
         </div>
       `);
     }
 
     const totalHeight = columnHeight + this._timeColPad;
+
     out.unshift(html`<style>.grid{grid-template-columns:70px repeat(${this._config.visible_days || 7}, 1fr); height:${totalHeight}px}</style>`);
     return out;
   }
