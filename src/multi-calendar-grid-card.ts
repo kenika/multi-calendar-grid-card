@@ -998,7 +998,6 @@ export class MultiCalendarGridCard extends LitElement {
       let bodyBg = "";
       if (isToday && todayColor) { headerBg = todayColor; bodyBg = todayColor; }
       else if (isWknd && weekendColor) { headerBg = weekendColor; bodyBg = weekendColor; }
-
       const allDayStyle = `top:0;${
         this._allDayHeight ? `height:${this._allDayHeight}px;margin-bottom:-${this._allDayHeight}px` : ""
       }`;

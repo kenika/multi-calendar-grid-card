@@ -29,3 +29,5 @@ Fixed in dev.17. The time column now accounts for the all-day area without freez
 ## All-day events disappear when scrolling
 Fixed in dev.15. Full-day events now stick below the header and use their calendar colors; the focus window also starts beneath this area.
 
+
+Fixed in dev.14. All-day events overlay the grid, and the time column automatically pads to match the header height.
