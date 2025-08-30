@@ -16,7 +16,7 @@ npm run check      # tsc --noEmit
 npm run build      # bundle for HA
 ```
 
-## Branch workflow
+## Git workflow
 
 - Base all work off the `dev` branch.
 - Before starting changes, sync with upstream: `git fetch` and `git rebase origin/dev` (or merge).
