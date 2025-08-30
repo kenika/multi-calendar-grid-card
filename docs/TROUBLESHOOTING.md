@@ -1,6 +1,6 @@
 # Troubleshooting
 
-> Baseline: **v0.8.0-dev.12**
+> Baseline: **v0.8.0-dev.19**
 
 ## “Unknown card type encountered ‘multi-calendar-grid-card’”
 The resource isn’t loaded. Add the module under **Settings → Dashboards → Resources**, or fix the URL.
@@ -24,5 +24,11 @@ If you previously hid a calendar in this card, its state is persisted in `localS
 HA tried to use the editor before it was defined. Ensure the editor bundle is included in the same built file (or lazy‑loaded) and that you hard‑reload the editor after updating.
 
 ## Slight misalignment of left time scale vs grid
-Known in dev.12 for some themes. A later patch measures the header height and inserts a mirrored spacer in the time column.
+Fixed in dev.18. The time column now accounts for the uniform all-day spacer.
+
+## All-day events disappear when scrolling
+Fixed in dev.15. Full-day events now stick below the header and use their calendar colors; the focus window also starts beneath this area.
+
+## Dashboard becomes unresponsive or blank
+Fixed in dev.19. Rendering now guards against missing day data.
 

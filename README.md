@@ -10,7 +10,7 @@ A compact, **7‑day** time‑grid view that overlays multiple Home Assistant ca
 
 - **Rolling 7‑day window** starting **today** by default (`start_today: true`).
 - **Overlay multiple calendars** with per‑calendar color + name.
-- **All‑day row** + timed events with smart overlap layout (lanes).
+- **All‑day events overlay** + timed events with smart overlap layout (lanes).
 - **Weather summary in each day header** (icon + low/high), using a robust multi‑strategy forecast fetch.
 - **Sticky day headers** (date + weather) while you scroll the time grid.
 - **“Now” indicator** line (optional).
