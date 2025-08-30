@@ -963,7 +963,6 @@ export class MultiCalendarGridCard extends LitElement {
     const pad = this._timeColPad + this._allDayHeight;
     return html`<div class="timecol" style="grid-column:1/2; grid-row:1/-1; position:relative;">
       <div class="ticks" style=${`height:${columnHeight}px;margin-top:${pad}px`}>${ticks}</div>
-
     </div>`;
   }
 
@@ -999,8 +998,7 @@ export class MultiCalendarGridCard extends LitElement {
       let bodyBg = "";
       if (isToday && todayColor) { headerBg = todayColor; bodyBg = todayColor; }
       else if (isWknd && weekendColor) { headerBg = weekendColor; bodyBg = weekendColor; }
-
-      const allDayStyle = `top:${this._timeColPad}px;${
+      const allDayStyle = `top:0;${
         this._allDayHeight ? `height:${this._allDayHeight}px;margin-bottom:-${this._allDayHeight}px` : ""
       }`;
       const allDay = this._config.show_all_day

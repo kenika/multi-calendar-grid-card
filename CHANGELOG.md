@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0-dev.17
+- Anchor all-day overlay at the top so it no longer shifts the grid or freezes the dashboard.
+- Start the time scale beneath the header and all-day area without crashing.
+
 ## 0.8.0-dev.16
 - Prevent crash when day data is missing for all-day events.
 - Offset time column for all-day overlay so the scale starts beneath the header.
