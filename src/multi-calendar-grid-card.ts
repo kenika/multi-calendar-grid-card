@@ -1,12 +1,12 @@
 /* Multi-Calendar Grid Card
- * v0.8.0-dev.12 — Tick alignment, DOM grid lines, midnight-to-midnight, dialog chips, dedup, 12/24h
+ * v0.8.0-dev.19 — Tick alignment, DOM grid lines, midnight-to-midnight, dialog chips, dedup, 12/24h
  */
 import { LitElement, css, html, nothing } from "lit";
 import "./editor/multi-calendar-grid-card-editor";
 
 /** Public card type & version */
 export const CARD_TAG = "multi-calendar-grid-card";
-export const VERSION = "0.8.0";
+export const VERSION = "0.8.0-dev.19";
 
 /** Config */
 export type EntityCfg = {
