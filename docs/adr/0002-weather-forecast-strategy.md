@@ -1,6 +1,6 @@
 # ADR-0002: Weather forecast strategy
 
-- **Status**: Accepted (dev.12)
+- **Status**: Accepted (dev.19)
 - **Decision order**:
   1. `weather.get_forecasts` WS (`daily`)
   2. `weather.get_forecasts` WS (`hourly` → aggregate daily)

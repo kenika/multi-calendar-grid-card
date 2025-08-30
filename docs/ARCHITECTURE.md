@@ -1,6 +1,6 @@
 # Architecture
 
-> Baseline: **v0.8.0-dev.12**
+> Baseline: **v0.8.0-dev.19**
 
 ## Overview
 

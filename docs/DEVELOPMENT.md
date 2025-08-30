@@ -1,6 +1,6 @@
 # Development
 
-> Baseline: **v0.8.0-dev.12**
+> Baseline: **v0.8.0-dev.19**
 
 ## Prereqs
 
@@ -24,10 +24,16 @@ npm run build      # bundle for HA
 
 ## Local testing in HA
 
-1. Copy the build to `/config/www/dev/multi-calendar-grid-card-dev12.js`.
-2. Add a **Resource** pointing to `/local/dev/multi-calendar-grid-card-dev12.js` (type `module`).
-3. In a test view, add the card via YAML (see README examples).
-4. Shift+Reload the dashboard after each build (or clear cache).
+1. Build with a versioned name (the `.map` will match automatically):
+
+   ```bash
+   BUILD_NAME=multi-calendar-grid-card-0.8.0-dev19 npm run build
+   ```
+
+2. Copy `dist/multi-calendar-grid-card-0.8.0-dev19.js` to `/config/www/dev/`.
+3. Add a **Resource** pointing to `/local/dev/multi-calendar-grid-card-0.8.0-dev19.js` (type `module`).
+4. In a test view, add the card via YAML (see README examples).
+5. Shift+Reload the dashboard after each build (or clear cache).
 
 ## Release hygiene
 
