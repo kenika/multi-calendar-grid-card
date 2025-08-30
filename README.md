@@ -133,3 +133,10 @@ remember_offset: true
 weather_entity: weather.integra_langsbau_1_3
 weather_days: 7
 ```
+
+## Development workflow
+
+- `main` holds stable releases; active work lives on `dev`.
+- For changes, branch from `dev` and open a pull request back into `dev`.
+- Enable auto‑merge and avoid using **Update branch**; rebase or merge locally if `dev` moves ahead.
+- The legacy `work` branch has been retired in favor of short‑lived feature branches.

@@ -29,6 +29,26 @@ npm run check      # tsc --noEmit
 npm run build      # bundle for HA
 ```
 
+## Git workflow
+
+- `dev` is the active development branch; `main` tracks stable releases.
+- Start new work from the latest `dev` and use short‑lived feature branches:
+
+  ```bash
+  git checkout dev
+  git pull
+  git checkout -b feature/<topic>
+  ```
+
+- Push the branch and open a pull request back into `dev`:
+
+  ```bash
+  git push -u origin feature/<topic>
+  ```
+
+- Enable auto‑merge on the PR. Avoid the **Update branch** button; if `dev` moves ahead, rebase or merge locally and push again.
+- The former `work` branch has been removed in favor of this workflow.
+
 ## Linting rules
 
 - No `console.*` calls left in source
