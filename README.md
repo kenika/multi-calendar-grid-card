@@ -138,5 +138,7 @@ weather_days: 7
 
 - `main` holds stable releases; active work lives on `dev`.
 - For changes, branch from `dev` and open a pull request back into `dev`.
+- Run `npm run lint`, `npm run check`, `npm test`, and `npm run build` before pushing.
 - Enable auto‑merge and avoid using **Update branch**; rebase or merge locally if `dev` moves ahead.
 - The legacy `work` branch has been retired in favor of short‑lived feature branches.
+- See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for full instructions.

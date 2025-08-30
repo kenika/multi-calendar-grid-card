@@ -21,6 +21,7 @@ npm run build      # bundle for HA
 - Base all work off the `dev` branch.
 - Before starting changes, sync with upstream: `git fetch` and `git rebase origin/dev` (or merge).
 - Create a topic branch for each change: `git checkout -b feature/<topic>`.
+- Run `npm run lint`, `npm run check`, `npm test`, and `npm run build` before pushing.
 - Commit and push: `git push -u origin feature/<topic>` then open a PR into `dev`.
 - Enable auto-merge (or merge manually) once checks pass.
 - Skip the **Update branch** button unless `dev` has moved ahead and you need the latest commits.
